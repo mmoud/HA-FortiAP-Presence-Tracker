@@ -1,0 +1,89 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to FortiGate policies",
+        "description": "Enter one policy ID or a comma-separated list. Every policy is read and identity-checked before this entry is created.",
+        "data": {
+          "host": "FortiGate hostname or IP address",
+          "port": "HTTPS port",
+          "vdom": "VDOM",
+          "policy_ids": "Firewall policy IDs (comma-separated)",
+          "api_token": "REST API token",
+          "verify_ssl": "Verify FortiGate TLS certificate"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure FortiGate policies",
+        "description": "Enter one policy ID or a comma-separated list. Enter the API token again because its saved value is not shown.",
+        "data": {
+          "host": "FortiGate hostname or IP address",
+          "port": "HTTPS port",
+          "vdom": "VDOM",
+          "policy_ids": "Firewall policy IDs (comma-separated)",
+          "api_token": "REST API token",
+          "verify_ssl": "Verify FortiGate TLS certificate"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect FortiGate policy",
+        "description": "FortiGate rejected the saved API token. Enter a replacement token.",
+        "data": {
+          "api_token": "REST API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach FortiGate, its TLS certificate could not be verified, or it returned unexpected JSON.",
+      "invalid_auth": "FortiGate rejected the token or its permissions.",
+      "not_found": "The VDOM or one of the firewall policy IDs was not found.",
+      "invalid_input": "Enter a hostname/IP, VDOM, token, and comma-separated numeric policy IDs.",
+      "unknown": "Unexpected error while validating the FortiGate policy."
+    },
+    "abort": {
+      "already_configured": "This FortiGate policy is already configured.",
+      "reauth_successful": "FortiGate policy token updated."
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_connect": "Cannot reach FortiGate, its TLS certificate could not be verified, or it returned unexpected JSON.",
+      "invalid_auth": "FortiGate rejected the token or its permissions.",
+      "not_found": "The Wi-Fi monitor endpoint, VDOM, or configured policy was not found.",
+      "no_wifi_clients": "No Wi-Fi clients are currently known. Connect a device to a managed FortiAP and try again."
+    },
+    "step": {
+      "init": {
+        "title": "FortiGate policy and Wi-Fi options",
+        "data": {
+          "poll_interval": "Firewall policy polling interval (seconds)",
+          "wifi_tracking_enabled": "Enable Wi-Fi presence tracking",
+          "wifi_poll_interval": "Wi-Fi client polling interval (seconds)",
+          "wifi_away_grace_period": "Away grace period (seconds)",
+          "wifi_client_count_sensor": "Create Wi-Fi client count sensor"
+        }
+      },
+      "wifi_clients": {
+        "title": "Select Wi-Fi clients to track",
+        "description": "Found {count} associated or FortiGate-known clients. Each selected client creates a device tracker and presence binary sensor; selections remain while offline.",
+        "data": {
+          "selected_wifi_clients": "Tracked Wi-Fi clients"
+        }
+      },
+      "wifi_client_name": {
+        "title": "Name Wi-Fi client",
+        "description": "Choose a friendly name for {client} ({mac}). The MAC address remains its stable identity.",
+        "data": {
+          "friendly_name": "Friendly name"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "presence": {
+        "name": "Presence"
+      }
+    }
+  }
+}

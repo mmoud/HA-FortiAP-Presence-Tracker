@@ -1,0 +1,47 @@
+"""Constants for the FortiGate Policy Presence integration."""
+
+from datetime import timedelta
+
+DOMAIN = "fortigate_policy"
+
+CONF_API_TOKEN = "api_token"
+CONF_VDOM = "vdom"
+CONF_POLICY_ID = "policy_id"
+CONF_POLICY_NAME = "policy_name"
+CONF_POLICY_IDS = "policy_ids"
+CONF_POLICIES = "policies"
+CONF_LEGACY_PRIMARY_POLICY_ID = "legacy_primary_policy_id"
+CONF_VERIFY_SSL = "verify_ssl"
+CONF_POLL_INTERVAL = "poll_interval"
+CONF_WIFI_TRACKING_ENABLED = "wifi_tracking_enabled"
+CONF_WIFI_POLL_INTERVAL = "wifi_poll_interval"
+CONF_WIFI_AWAY_GRACE_PERIOD = "wifi_away_grace_period"
+CONF_WIFI_CLIENT_COUNT_SENSOR = "wifi_client_count_sensor"
+CONF_TRACKED_CLIENTS = "tracked_clients"
+CONF_RECENT_WIFI_CLIENTS = "recent_wifi_clients"
+CONF_FRIENDLY_NAME = "friendly_name"
+
+DEFAULT_PORT = 443
+DEFAULT_VDOM = "root"
+DEFAULT_VERIFY_SSL = True
+DEFAULT_POLL_INTERVAL = 60
+DEFAULT_TIMEOUT = 10
+MIN_POLL_INTERVAL = 30
+MAX_POLL_INTERVAL = 3600
+
+DEFAULT_WIFI_TRACKING_ENABLED = False
+DEFAULT_WIFI_POLL_INTERVAL = 30
+DEFAULT_WIFI_AWAY_GRACE_PERIOD = 180
+MIN_WIFI_POLL_INTERVAL = 15
+MAX_WIFI_POLL_INTERVAL = 120
+MIN_WIFI_AWAY_GRACE_PERIOD = 30
+MAX_WIFI_AWAY_GRACE_PERIOD = 3600
+DEFAULT_WIFI_CLIENT_COUNT_SENSOR = False
+MAX_RECENT_WIFI_CLIENTS = 100
+
+STATUS_ENABLE = "enable"
+STATUS_DISABLE = "disable"
+VALID_STATUSES = frozenset({STATUS_ENABLE, STATUS_DISABLE})
+
+UPDATE_RETRIES = 3
+UPDATE_RETRY_DELAY = timedelta(seconds=2)

@@ -95,8 +95,8 @@ def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     )
 
 
-def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
-    """Return adjustable policy and Wi-Fi presence options."""
+def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Return polling and diagnostic sensor options."""
     return vol.Schema(
         {
             vol.Required(
@@ -106,12 +106,6 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 vol.Coerce(int),
                 vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
             ),
-            vol.Required(
-                CONF_WIFI_TRACKING_ENABLED,
-                default=defaults.get(
-                    CONF_WIFI_TRACKING_ENABLED, DEFAULT_WIFI_TRACKING_ENABLED
-                ),
-            ): bool,
             vol.Required(
                 CONF_WIFI_POLL_INTERVAL,
                 default=defaults.get(
@@ -142,6 +136,40 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             ): bool,
         }
     )
+
+
+def _selected_wifi_macs(selected: object, manual: object) -> list[str]:
+    """Normalize and deduplicate selected and manually entered MAC addresses."""
+    values: list[object] = []
+    if isinstance(selected, list):
+        values.extend(selected)
+    if isinstance(manual, str):
+        values.extend(
+            value for value in manual.replace(";", ",").split(",") if value.strip()
+        )
+    result: list[str] = []
+    for value in values:
+        normalized = normalize_mac(value)
+        if normalized is not None and normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _preserved_client_names(
+    selected_macs: list[str], tracked: object
+) -> dict[str, dict[str, str]]:
+    """Keep friendly names for trackers that remain selected."""
+    if not isinstance(tracked, dict):
+        return {}
+    preserved: dict[str, dict[str, str]] = {}
+    for mac, metadata in tracked.items():
+        normalized = normalize_mac(mac)
+        if normalized not in selected_macs or not isinstance(metadata, dict):
+            continue
+        name = metadata.get(CONF_FRIENDLY_NAME)
+        if isinstance(name, str) and name.strip():
+            preserved[normalized] = {CONF_FRIENDLY_NAME: name.strip()}
+    return preserved
 
 
 def _normalize(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -341,6 +369,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
     """Configure policy polling and opt-in Wi-Fi presence without YAML."""
 
     _SELECTED_CLIENTS = "selected_wifi_clients"
+    _MANUAL_MACS = "manual_wifi_macs"
 
     def __init__(self) -> None:
         """Keep state during the select-then-name native options flow."""
@@ -352,14 +381,26 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage polling cadence."""
+        """Show clear entry points for trackers and advanced settings."""
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        tracked_count = len(tracked) if isinstance(tracked, dict) else 0
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["wifi_clients", "wifi_settings"],
+            description_placeholders={"tracked": str(tracked_count)},
+        )
+
+    async def async_step_wifi_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage polling cadence and the optional client-count sensor."""
         if user_input is not None:
-            self._new_options = {**dict(self.config_entry.options), **user_input}
-            if not user_input[CONF_WIFI_TRACKING_ENABLED]:
-                return self.async_create_entry(data=self._new_options)
-            return await self.async_step_wifi_clients()
+            return self.async_create_entry(
+                data={**dict(self.config_entry.options), **user_input}
+            )
         return self.async_show_form(
-            step_id="init", data_schema=_options_schema(dict(self.config_entry.options))
+            step_id="wifi_settings",
+            data_schema=_settings_schema(dict(self.config_entry.options)),
         )
 
     async def async_step_wifi_clients(
@@ -367,16 +408,27 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Discover associated stations and select only the MACs to track."""
         errors: dict[str, str] = {}
+        if not self._new_options:
+            self._new_options = dict(self.config_entry.options)
         if user_input is not None:
-            selected = user_input.get(self._SELECTED_CLIENTS, [])
-            self._selected_macs = [
-                mac for value in selected if (mac := normalize_mac(value)) is not None
-            ]
-            self._named_clients = {}
-            if not self._selected_macs:
-                self._new_options[CONF_TRACKED_CLIENTS] = {}
+            enabled = user_input[CONF_WIFI_TRACKING_ENABLED]
+            self._new_options[CONF_WIFI_TRACKING_ENABLED] = enabled
+            if not enabled:
                 self._new_options[CONF_RECENT_WIFI_CLIENTS] = self._recent_clients
                 return self.async_create_entry(data=self._new_options)
+            self._selected_macs = _selected_wifi_macs(
+                user_input.get(self._SELECTED_CLIENTS, []),
+                user_input.get(self._MANUAL_MACS, ""),
+            )
+            if not self._selected_macs:
+                errors["base"] = "select_at_least_one"
+                return self._wifi_clients_form(errors)
+            self._named_clients = _preserved_client_names(
+                self._selected_macs,
+                self.config_entry.options.get(CONF_TRACKED_CLIENTS, {}),
+            )
+            if len(self._named_clients) == len(self._selected_macs):
+                return self._finish_wifi_clients()
             return await self.async_step_wifi_client_name()
 
         try:
@@ -385,23 +437,39 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             errors["base"] = _error_key(err)
             clients = {}
         self._recent_clients = self._merged_recent_clients(clients)
+        return self._wifi_clients_form(errors)
+
+    def _wifi_clients_form(self, errors: dict[str, str]) -> ConfigFlowResult:
+        """Build the discovery form with an explicit manual-MAC fallback."""
         options = [
             {"value": mac, "label": self._client_label(mac, metadata)}
             for mac, metadata in sorted(self._recent_clients.items())
         ]
-        if not options and not errors:
-            errors["base"] = "no_wifi_clients"
-        existing = self._selected_from_options()
         return self.async_show_form(
             step_id="wifi_clients",
             data_schema=vol.Schema(
                 {
                     vol.Required(
+                        CONF_WIFI_TRACKING_ENABLED,
+                        default=self._new_options.get(
+                            CONF_WIFI_TRACKING_ENABLED,
+                            bool(self._selected_from_options())
+                            or DEFAULT_WIFI_TRACKING_ENABLED,
+                        ),
+                    ): bool,
+                    vol.Required(
                         self._SELECTED_CLIENTS,
-                        default=existing,
+                        default=self._selected_from_options(),
                     ): SelectSelector(
-                        SelectSelectorConfig(options=options, multiple=True)
-                    )
+                        SelectSelectorConfig(
+                            options=options,
+                            multiple=True,
+                            custom_value=True,
+                        )
+                    ),
+                    vol.Optional(self._MANUAL_MACS, default=""): TextSelector(
+                        TextSelectorConfig()
+                    ),
                 }
             ),
             errors=errors,
@@ -412,15 +480,15 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Assign a friendly name without using it as the stable MAC identity."""
-        mac = self._selected_macs[len(self._named_clients)]
+        mac = next(mac for mac in self._selected_macs if mac not in self._named_clients)
         if user_input is not None:
             name = user_input[CONF_FRIENDLY_NAME].strip() or self._default_name(mac)
             self._named_clients[mac] = {CONF_FRIENDLY_NAME: name}
             if len(self._named_clients) == len(self._selected_macs):
-                self._new_options[CONF_TRACKED_CLIENTS] = self._named_clients
-                self._new_options[CONF_RECENT_WIFI_CLIENTS] = self._recent_clients
-                return self.async_create_entry(data=self._new_options)
-            mac = self._selected_macs[len(self._named_clients)]
+                return self._finish_wifi_clients()
+            mac = next(
+                mac for mac in self._selected_macs if mac not in self._named_clients
+            )
 
         return self.async_show_form(
             step_id="wifi_client_name",
@@ -429,6 +497,13 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={"mac": mac, "client": self._default_name(mac)},
         )
+
+    def _finish_wifi_clients(self) -> ConfigFlowResult:
+        """Persist the exact selected tracker set and bounded discovery cache."""
+        self._new_options[CONF_WIFI_TRACKING_ENABLED] = True
+        self._new_options[CONF_TRACKED_CLIENTS] = self._named_clients
+        self._new_options[CONF_RECENT_WIFI_CLIENTS] = self._recent_clients
+        return self.async_create_entry(data=self._new_options)
 
     async def _async_discover_wifi_clients(
         self,

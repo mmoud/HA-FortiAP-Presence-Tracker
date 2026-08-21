@@ -18,9 +18,12 @@ from custom_components.fortigate_policy.config_flow import (
     _async_validate_input,
     _entry_data,
     _normalize,
+    _preserved_client_names,
+    _selected_wifi_macs,
 )
 from custom_components.fortigate_policy.const import (
     CONF_API_TOKEN,
+    CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
     CONF_POLICIES,
     CONF_POLICY_IDS,
@@ -72,6 +75,29 @@ class TestPresenceBinarySensor(unittest.TestCase):
         self.assertIsNone(entity.is_on)
         coordinator.last_update_success = False
         self.assertFalse(entity.available)
+
+
+class TestWifiTrackerOptions(unittest.TestCase):
+    def test_discovered_and_manual_macs_are_normalized_and_deduplicated(self) -> None:
+        self.assertEqual(
+            ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"],
+            _selected_wifi_macs(
+                ["AA-BB-CC-DD-EE-FF"],
+                "aabbccddeeff, 11:22:33:44:55:66; invalid",
+            ),
+        )
+
+    def test_existing_names_are_preserved_only_for_selected_trackers(self) -> None:
+        self.assertEqual(
+            {"aa:bb:cc:dd:ee:ff": {CONF_FRIENDLY_NAME: "Example phone"}},
+            _preserved_client_names(
+                ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"],
+                {
+                    "AA-BB-CC-DD-EE-FF": {CONF_FRIENDLY_NAME: " Example phone "},
+                    "22:33:44:55:66:77": {CONF_FRIENDLY_NAME: "Removed"},
+                },
+            ),
+        )
 
 
 class TestPolicySwitchEntities(unittest.TestCase):

@@ -1,4 +1,4 @@
-# FortiGate Policy Presence
+# FortiGate for Home Assistant
 
 Home Assistant integration for controlling FortiGate firewall policies and tracking selected FortiAP Wi-Fi clients.
 
@@ -20,9 +20,9 @@ It provides:
 
 1. In HACS, open **Integrations > Custom repositories**.
 2. Add `https://github.com/mmoud/ha-fortigate` as an **Integration**.
-3. Download **FortiGate Policy Presence** and restart Home Assistant.
+3. Download **FortiGate** and restart Home Assistant.
 4. Open **Settings > Devices & services > Add integration**.
-5. Search for **FortiGate Policy Presence** and complete the form.
+5. Search for **FortiGate** and complete the form.
 
 No YAML configuration is required.
 
@@ -65,9 +65,12 @@ TLS certificate verification is enabled by default. Disable it only when the For
 
 ## Wi-Fi presence tracking
 
-Open **Settings > Devices & services**, select the integration, then choose **Configure**. Enable Wi-Fi tracking, set the polling and away intervals, and select the clients to track.
+Open **Settings > Devices & services > FortiGate**, find the configured entry, and select **Configure**. The options menu has two clear actions:
 
-Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. This makes known offline devices easier to identify. Each selected MAC creates two entities:
+- **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
+- **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
+
+On the tracker screen, enable Wi-Fi presence tracking, select one or more devices, and save. Only newly selected devices ask for a friendly name; existing names are preserved. Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. Each selected MAC creates two entities:
 
 - `device_tracker.<device_name>` with `home`, `not_home`, or unavailable state
 - `binary_sensor.<device_name>_presence`, which is ON at home, OFF when away, and unavailable during a FortiGate/API failure
@@ -139,7 +142,7 @@ Common checks:
 - **404:** check the VDOM, policy ID, and whether the Wi-Fi monitor endpoint is available in the installed FortiOS release.
 - **Policy unavailable:** confirm the policy ID and expected policy name match exactly.
 - **TLS failure:** install a trusted certificate on the FortiGate or, for an isolated test only, disable certificate verification.
-- **No clients listed:** confirm the FortiGate manages the FortiAPs and the API administrator can read Wireless Controller monitor data.
+- **No clients listed:** confirm the FortiGate manages the FortiAPs and the API administrator can read Wireless Controller monitor data. You can still enter the device MAC manually on **Add or manage Wi-Fi trackers**.
 - **Duplicate phone names:** choose the MAC used on the intended SSID; private Wi-Fi addresses can create multiple records.
 
 Test Wi-Fi API access from a trusted host without putting the token in the URL:

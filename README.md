@@ -71,14 +71,15 @@ TLS certificate verification is enabled by default. Disable it only when the For
 
 ## Wi-Fi presence tracking
 
-Open **Settings > Devices & services > FortiAP Presence Tracker**, find the configured entry, and select **Configure**. The options menu includes:
+Open **Settings > Devices & services > FortiAP Presence Tracker**, find the configured entry, and select **Configure**. Home Assistant requires custom integrations to enter configuration through this button. The integration then opens a status hub showing the number of tracked devices, people, rules, and policies, plus the current enforcement mode.
 
-- **Firewall policies** adds or removes optional firewall-policy switches.
-- **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
-- **Presence users** combines one or more trackers into one stable person state.
-- **Policy automation rules** maps one or more presence users to prioritized firewall actions.
-- **Remove Wi-Fi trackers** deletes selected tracker entities, presence sensors, and their Home Assistant device entries without changing anything on FortiGate.
-- **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
+The hub is organized by task:
+
+- **Guided parental-control setup** creates a person and one rule in three reviewed steps: person and devices, policy behavior, then confirmation.
+- **People and devices** discovers clients, manages tracked devices, and combines a person's phone, watch, tablet, or other devices.
+- **Parental-control rules** creates or edits prioritized firewall actions.
+- **Firewall policies** adds or removes optional verified policy switches.
+- **Advanced settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
 
 Disabling Wi-Fi tracking is reversible and retains the selected devices. Use **Remove Wi-Fi trackers** when the entities should be deleted from Home Assistant.
 
@@ -91,7 +92,7 @@ On the tracker screen, enable Wi-Fi presence tracking, select one or more device
 
 Both entities use the same coordinator result and away grace period. The binary sensor does not add another FortiGate request.
 
-Under **Presence users**, assign a phone, watch, tablet, or other selected trackers to one user. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The user is home as soon as any assigned device is home. The user becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the user is unavailable rather than away.
+Under **People and devices > Manage people**, assign a phone, watch, tablet, or other selected trackers to one person. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The person is home as soon as any assigned device is home. The person becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the person is unavailable rather than away.
 
 Each user has its own away grace period. This can extend the base device grace for phones or watches that sleep aggressively. A device can belong to only one user, preventing accidental duplicate presence profiles.
 
@@ -122,13 +123,9 @@ Apple devices may use a private MAC address. Track the address shown by FortiGat
 
 ## Parental control
 
-The integration can apply policy states directly from presence without separate Home Assistant automations:
+The integration can apply policy states directly from presence without separate Home Assistant automations. For a new person, open **Configure > Guided parental-control setup**. Select all of the person's tracked devices, choose the verified policies and behavior, then review the complete rule before confirming it.
 
-1. Configure the firewall policies and Wi-Fi trackers first.
-2. Open **Configure > Presence users**.
-3. Add each user and select all of that person's tracked devices.
-4. Open **Configure > Policy automation rules**.
-5. Add the required home/away rules and preview each one before saving.
+For more complex installations, use **People and devices** to maintain people and **Parental-control rules** to create rules involving multiple people, priorities, or schedules.
 
 For example, a user with an iPhone and Apple Watch remains home while either device is connected. Another user can independently disable policies 1 and 2 while away. Policy fields are optional, so aggregate user trackers can also be used only in Home Assistant automations.
 
@@ -136,7 +133,7 @@ Rules are evaluated from aggregate current state rather than only on transitions
 
 ### Policy automation rules
 
-For installations with several users, use **Configure > Policy automation rules**. A rule contains:
+For installations with several users, use **Configure > Parental-control rules > Manage existing rules**. A rule contains:
 
 - one or more presence users
 - **Any user** or **All users** matching
@@ -150,7 +147,7 @@ The integration shows a complete preview and requires confirmation before saving
 
 Only the highest-priority matching rules control a policy. If rules at the same winning priority request opposite states, disable wins and the conflict is exposed by the decision sensor. Existing user-attached rules continue to work at priority 0.
 
-**Configure > Polling and sensors** also provides:
+**Configure > Advanced settings > Polling, safety, and sensors** also provides:
 
 - **Enable automatic policy enforcement**: global maintenance pause. Decisions remain visible, but no automatic policy writes occur.
 - **Dry run**: evaluate presence rules without changing FortiGate. Manual override selections remain deliberate commands and are still applied.

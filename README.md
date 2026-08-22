@@ -6,7 +6,9 @@ It provides:
 
 - an optional verified switch for each configured firewall policy
 - `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
-- multi-device user profiles with independent home and away policy rules
+- multi-device presence users for phones, watches, and tablets
+- policy-centric ANY/ALL rules with priorities and optional Schedule helpers
+- dry-run mode, expiring policy overrides, and per-policy decision sensors
 - an optional sensor showing the number of associated Wi-Fi clients
 - a read-only button for immediately refreshing policy and presence data
 - full setup and configuration through the Home Assistant UI
@@ -73,7 +75,8 @@ Open **Settings > Devices & services > FortiAP Presence Tracker**, find the conf
 
 - **Firewall policies** adds or removes optional firewall-policy switches.
 - **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
-- **Users and policy rules** combines one or more trackers into a user and assigns independent home and away policy states.
+- **Presence users** combines one or more trackers into one stable person state.
+- **Policy automation rules** maps one or more presence users to prioritized firewall actions.
 - **Remove Wi-Fi trackers** deletes selected tracker entities, presence sensors, and their Home Assistant device entries without changing anything on FortiGate.
 - **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
 
@@ -88,7 +91,9 @@ On the tracker screen, enable Wi-Fi presence tracking, select one or more device
 
 Both entities use the same coordinator result and away grace period. The binary sensor does not add another FortiGate request.
 
-Under **Users and policy rules**, assign a phone, watch, tablet, or other selected trackers to one user. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The user is home as soon as any assigned device is home. The user becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the user is unavailable rather than away.
+Under **Presence users**, assign a phone, watch, tablet, or other selected trackers to one user. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The user is home as soon as any assigned device is home. The user becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the user is unavailable rather than away.
+
+Each user has its own away grace period. This can extend the base device grace for phones or watches that sleep aggressively. A device can belong to only one user, preventing accidental duplicate presence profiles.
 
 Presence polling uses:
 
@@ -111,6 +116,8 @@ The MAC address is the tracker's stable identity. Colon-separated, hyphenated, a
 
 The default polling interval is 30 seconds and the default away grace period is 180 seconds.
 
+Recently discovered clients are retained for a configurable number of days and then pruned from the bounded discovery list unless they are selected trackers. The native device selector is searchable and lists the last observation time when it is known.
+
 Apple devices may use a private MAC address. Track the address shown by FortiGate for the required SSID. Apple's Fixed private address mode provides a stable address without disabling Private Wi-Fi Address globally.
 
 ## Parental control
@@ -118,14 +125,45 @@ Apple devices may use a private MAC address. Track the address shown by FortiGat
 The integration can apply policy states directly from presence without separate Home Assistant automations:
 
 1. Configure the firewall policies and Wi-Fi trackers first.
-2. Open **Configure > Users and policy rules**.
-3. Add a user and select all of that user's tracked devices.
-4. Choose policies to enable or disable while the user is home and away.
-5. Repeat for each person who needs a different policy profile.
+2. Open **Configure > Presence users**.
+3. Add each user and select all of that person's tracked devices.
+4. Open **Configure > Policy automation rules**.
+5. Add the required home/away rules and preview each one before saving.
 
 For example, a user with an iPhone and Apple Watch remains home while either device is connected. Another user can independently disable policies 1 and 2 while away. Policy fields are optional, so aggregate user trackers can also be used only in Home Assistant automations.
 
 Rules are evaluated from aggregate current state rather than only on transitions. This makes them recover correctly after a restart or a manual policy change. When users' rules disagree about a shared policy, disable wins. Unknown aggregate presence or an unavailable Wi-Fi API leaves the policy unchanged. Every change still uses the normal policy preflight, status-only write, and read-back verification.
+
+### Policy automation rules
+
+For installations with several users, use **Configure > Policy automation rules**. A rule contains:
+
+- one or more presence users
+- **Any user** or **All users** matching
+- required state: home or away
+- one or more target policies
+- enable or disable action
+- priority from 0 to 100
+- an optional Home Assistant `schedule` entity
+
+The integration shows a complete preview and requires confirmation before saving. A schedule that is OFF makes the rule inactive. An unavailable schedule or an unknown required presence blocks the affected policy rather than guessing.
+
+Only the highest-priority matching rules control a policy. If rules at the same winning priority request opposite states, disable wins and the conflict is exposed by the decision sensor. Existing user-attached rules continue to work at priority 0.
+
+**Configure > Polling and sensors** also provides:
+
+- **Enable automatic policy enforcement**: global maintenance pause. Decisions remain visible, but no automatic policy writes occur.
+- **Dry run**: evaluate presence rules without changing FortiGate. Manual override selections remain deliberate commands and are still applied.
+- **Default manual override duration**: how long a forced or paused policy remains overridden; `0` means until changed or Home Assistant restarts.
+
+Every rule-managed policy receives:
+
+- `sensor.fortigate_policy_<id>_automation_decision`, showing the calculated action, reason, conflict, dry-run state, last application, and error
+- `select.fortigate_policy_<id>_automation_override` with Automatic, Force enabled, Force disabled, and Paused
+
+Overrides are intentionally kept in memory. A Home Assistant restart returns control to Automatic, preventing an old forced state from being silently restored. Verified changes appear in Activity and fire a `fortigate_policy_decision` event containing only the policy ID, verified state, and safe decision reason. Repeated enforcement failures create a Home Assistant Repair issue.
+
+For a one-off duration, call the **FortiAP Presence Tracker: Set policy automation override** action from Home Assistant's action UI. Supply the config entry ID, policy ID, mode, and duration in minutes. This does not require YAML.
 
 The presence entities and policy switches remain available for normal Home Assistant automations when more complex conditions are required.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,11 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     TextSelector,
@@ -31,30 +37,47 @@ from .api import (
 )
 from .const import (
     CONF_API_TOKEN,
-    CONF_AWAY_DISABLE_POLICIES,
-    CONF_AWAY_ENABLE_POLICIES,
+    CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_FRIENDLY_NAME,
-    CONF_HOME_DISABLE_POLICIES,
-    CONF_HOME_ENABLE_POLICIES,
     CONF_LEGACY_PRIMARY_POLICY_ID,
     CONF_POLICIES,
+    CONF_POLICY_AUTOMATION_DRY_RUN,
+    CONF_POLICY_AUTOMATION_ENABLED,
     CONF_POLICY_IDS,
+    CONF_POLICY_RULE_ACTION,
+    CONF_POLICY_RULE_ID,
+    CONF_POLICY_RULE_MATCH,
+    CONF_POLICY_RULE_NAME,
+    CONF_POLICY_RULE_POLICIES,
+    CONF_POLICY_RULE_PRESENCE,
+    CONF_POLICY_RULE_PRIORITY,
+    CONF_POLICY_RULE_SCHEDULE,
+    CONF_POLICY_RULE_USERS,
+    CONF_POLICY_RULES_TO_REMOVE,
+    CONF_POLICY_RULES_V2,
     CONF_POLL_INTERVAL,
     CONF_PRESENCE_USER_ID,
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
     CONF_PRESENCE_USERS_TO_REMOVE,
+    CONF_RECENT_CLIENT_RETENTION_DAYS,
     CONF_RECENT_WIFI_CLIENTS,
     CONF_TRACKED_CLIENTS,
+    CONF_USER_AWAY_GRACE_PERIOD,
     CONF_VDOM,
     CONF_VERIFY_SSL,
     CONF_WIFI_AWAY_GRACE_PERIOD,
     CONF_WIFI_CLIENT_COUNT_SENSOR,
     CONF_WIFI_POLL_INTERVAL,
     CONF_WIFI_TRACKING_ENABLED,
+    DEFAULT_OVERRIDE_MINUTES,
+    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
+    DEFAULT_POLICY_AUTOMATION_ENABLED,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_PORT,
+    DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
+    DEFAULT_USER_AWAY_GRACE_PERIOD,
     DEFAULT_VDOM,
     DEFAULT_VERIFY_SSL,
     DEFAULT_WIFI_AWAY_GRACE_PERIOD,
@@ -62,13 +85,23 @@ from .const import (
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
     DOMAIN,
+    MAX_OVERRIDE_MINUTES,
     MAX_POLL_INTERVAL,
+    MAX_RECENT_CLIENT_RETENTION_DAYS,
     MAX_RECENT_WIFI_CLIENTS,
+    MAX_USER_AWAY_GRACE_PERIOD,
     MAX_WIFI_AWAY_GRACE_PERIOD,
     MAX_WIFI_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
+    MIN_USER_AWAY_GRACE_PERIOD,
     MIN_WIFI_AWAY_GRACE_PERIOD,
     MIN_WIFI_POLL_INTERVAL,
+    RULE_MATCH_ALL,
+    RULE_MATCH_ANY,
+    RULE_PRESENCE_AWAY,
+    RULE_PRESENCE_HOME,
+    STATUS_DISABLE,
+    STATUS_ENABLE,
 )
 from .policy_config import (
     PolicyDefinition,
@@ -77,7 +110,12 @@ from .policy_config import (
     parse_optional_policy_ids,
     serialize_policies,
 )
-from .presence_users import RULE_FIELDS, serialize_presence_users
+from .policy_rules import serialize_policy_rules
+from .presence_users import (
+    aggregate_presence,
+    configured_presence_users,
+    serialize_presence_users,
+)
 from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 TOKEN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
@@ -146,6 +184,36 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
                     DEFAULT_WIFI_CLIENT_COUNT_SENSOR,
                 ),
             ): bool,
+            vol.Required(
+                CONF_POLICY_AUTOMATION_ENABLED,
+                default=defaults.get(
+                    CONF_POLICY_AUTOMATION_ENABLED,
+                    DEFAULT_POLICY_AUTOMATION_ENABLED,
+                ),
+            ): bool,
+            vol.Required(
+                CONF_POLICY_AUTOMATION_DRY_RUN,
+                default=defaults.get(
+                    CONF_POLICY_AUTOMATION_DRY_RUN,
+                    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
+                ),
+            ): bool,
+            vol.Required(
+                CONF_DEFAULT_OVERRIDE_MINUTES,
+                default=defaults.get(
+                    CONF_DEFAULT_OVERRIDE_MINUTES, DEFAULT_OVERRIDE_MINUTES
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_OVERRIDE_MINUTES)),
+            vol.Required(
+                CONF_RECENT_CLIENT_RETENTION_DAYS,
+                default=defaults.get(
+                    CONF_RECENT_CLIENT_RETENTION_DAYS,
+                    DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=1, max=MAX_RECENT_CLIENT_RETENTION_DAYS),
+            ),
         }
     )
 
@@ -285,7 +353,7 @@ def _error_key(err: Exception) -> str:
 class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure the integration entirely through Home Assistant's UI."""
 
-    VERSION = 4
+    VERSION = 6
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -412,6 +480,8 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self._selected_macs: list[str] = []
         self._named_clients: dict[str, dict[str, str]] = {}
         self._presence_user_id: str | None = None
+        self._policy_rule_id: str | None = None
+        self._pending_policy_rule: dict[str, Any] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -422,6 +492,13 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         menu_options = ["firewall_policies", "wifi_clients"]
         if tracked_count:
             menu_options.append("presence_users")
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        if (
+            isinstance(users, dict)
+            and users
+            and configured_policies(self.config_entry.data)
+        ):
+            menu_options.append("policy_rules")
         if tracked_count:
             menu_options.append("remove_wifi_trackers")
         menu_options.append("wifi_settings")
@@ -471,6 +548,16 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                         **dict(self.config_entry.options),
                         CONF_TRACKED_CLIENTS: remaining,
                         CONF_PRESENCE_USERS: users,
+                        CONF_POLICY_RULES_V2: serialize_policy_rules(
+                            self.config_entry.options.get(CONF_POLICY_RULES_V2, {}),
+                            set(users),
+                            {
+                                policy.policy_id
+                                for policy in configured_policies(
+                                    self.config_entry.data
+                                )
+                            },
+                        ),
                     }
                 )
 
@@ -526,6 +613,11 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 options[CONF_PRESENCE_USERS] = serialize_presence_users(
                     current_users if isinstance(current_users, dict) else {},
                     set(self._selected_from_options()),
+                    {policy.policy_id for policy in policies},
+                )
+                options[CONF_POLICY_RULES_V2] = serialize_policy_rules(
+                    options.get(CONF_POLICY_RULES_V2, {}),
+                    set(options[CONF_PRESENCE_USERS]),
                     {policy.policy_id for policy in policies},
                 )
                 return self.async_create_entry(data=options)
@@ -642,26 +734,33 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 for mac in user_input.get(CONF_PRESENCE_USER_MACS, [])
                 if (normalized := normalize_mac(mac)) is not None
             }
-            home_enable = set(user_input.get(CONF_HOME_ENABLE_POLICIES, []))
-            home_disable = set(user_input.get(CONF_HOME_DISABLE_POLICIES, []))
-            away_enable = set(user_input.get(CONF_AWAY_ENABLE_POLICIES, []))
-            away_disable = set(user_input.get(CONF_AWAY_DISABLE_POLICIES, []))
+            existing = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+            if not isinstance(existing, dict):
+                existing = {}
+            assigned_elsewhere = {
+                normalized
+                for user_id, raw_user in existing.items()
+                if user_id != self._presence_user_id and isinstance(raw_user, dict)
+                for mac in raw_user.get(CONF_PRESENCE_USER_MACS, [])
+                if (normalized := normalize_mac(mac)) is not None
+            }
             if not name:
                 errors[CONF_PRESENCE_USER_NAME] = "required"
             elif not selected_macs:
                 errors[CONF_PRESENCE_USER_MACS] = "select_user_device"
-            elif home_enable & home_disable or away_enable & away_disable:
-                errors["base"] = "rule_state_conflict"
+            elif selected_macs & assigned_elsewhere:
+                errors[CONF_PRESENCE_USER_MACS] = "device_already_assigned"
             else:
-                existing = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
                 updated_users = dict(existing) if isinstance(existing, dict) else {}
                 updated_users[self._presence_user_id] = {
                     CONF_PRESENCE_USER_NAME: name,
                     CONF_PRESENCE_USER_MACS: sorted(selected_macs),
-                    **{
-                        field: sorted(set(user_input.get(field, [])))
-                        for field in RULE_FIELDS
-                    },
+                    CONF_USER_AWAY_GRACE_PERIOD: int(
+                        user_input.get(
+                            CONF_USER_AWAY_GRACE_PERIOD,
+                            DEFAULT_USER_AWAY_GRACE_PERIOD,
+                        )
+                    ),
                 }
                 updated_users = serialize_presence_users(
                     updated_users,
@@ -678,13 +777,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     }
                 )
 
-        policy_options = [
-            {
-                "value": policy.policy_id,
-                "label": f"{policy.expected_name or 'Policy'} ({policy.policy_id})",
-            }
-            for policy in configured_policies(self.config_entry.data)
-        ]
         fields: dict[Any, Any] = {
             vol.Required(
                 CONF_PRESENCE_USER_NAME,
@@ -696,16 +788,25 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             ): SelectSelector(
                 SelectSelectorConfig(options=self._tracker_options(), multiple=True)
             ),
+            vol.Required(
+                CONF_USER_AWAY_GRACE_PERIOD,
+                default=current.get(
+                    CONF_USER_AWAY_GRACE_PERIOD,
+                    self.config_entry.options.get(
+                        CONF_WIFI_AWAY_GRACE_PERIOD,
+                        DEFAULT_USER_AWAY_GRACE_PERIOD,
+                    ),
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=MIN_USER_AWAY_GRACE_PERIOD,
+                    max=MAX_USER_AWAY_GRACE_PERIOD,
+                    step=15,
+                    mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="s",
+                )
+            ),
         }
-        if policy_options:
-            fields.update(
-                {
-                    vol.Optional(field, default=current.get(field, [])): SelectSelector(
-                        SelectSelectorConfig(options=policy_options, multiple=True)
-                    )
-                    for field in RULE_FIELDS
-                }
-            )
         return self.async_show_form(
             step_id=("edit_presence_user_profile" if current else "add_presence_user"),
             data_schema=vol.Schema(fields),
@@ -725,14 +826,24 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             if not remove:
                 errors["base"] = "select_presence_user_to_remove"
             else:
+                remaining_users = {
+                    user_id: user
+                    for user_id, user in users.items()
+                    if user_id not in remove
+                }
+                policy_ids = {
+                    policy.policy_id
+                    for policy in configured_policies(self.config_entry.data)
+                }
                 return self.async_create_entry(
                     data={
                         **dict(self.config_entry.options),
-                        CONF_PRESENCE_USERS: {
-                            user_id: user
-                            for user_id, user in users.items()
-                            if user_id not in remove
-                        },
+                        CONF_PRESENCE_USERS: remaining_users,
+                        CONF_POLICY_RULES_V2: serialize_policy_rules(
+                            self.config_entry.options.get(CONF_POLICY_RULES_V2, {}),
+                            set(remaining_users),
+                            policy_ids,
+                        ),
                     }
                 )
         return self.async_show_form(
@@ -742,6 +853,324 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     vol.Required(CONF_PRESENCE_USERS_TO_REMOVE): SelectSelector(
                         SelectSelectorConfig(
                             options=self._user_options(), multiple=True
+                        )
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_policy_rules(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage policy-centric multi-user rules."""
+        raw_rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        menu = ["add_policy_rule"]
+        if isinstance(raw_rules, dict) and raw_rules:
+            menu.extend(["edit_policy_rule", "remove_policy_rules"])
+        return self.async_show_menu(step_id="policy_rules", menu_options=menu)
+
+    def _policy_rule_options(self) -> list[dict[str, str]]:
+        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        if not isinstance(rules, dict):
+            return []
+        return [
+            {
+                "value": rule_id,
+                "label": str(rule.get(CONF_POLICY_RULE_NAME, rule_id)),
+            }
+            for rule_id, rule in sorted(rules.items())
+            if isinstance(rule_id, str) and isinstance(rule, dict)
+        ]
+
+    async def async_step_add_policy_rule(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        self._policy_rule_id = self._policy_rule_id or uuid4().hex
+        return await self._async_policy_rule_form(user_input, {})
+
+    async def async_step_edit_policy_rule(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        if not isinstance(rules, dict) or not rules:
+            return self.async_abort(reason="no_policy_rules")
+        if user_input is not None:
+            selected = user_input.get(CONF_POLICY_RULE_ID)
+            if isinstance(selected, str) and selected in rules:
+                self._policy_rule_id = selected
+                return await self.async_step_edit_policy_rule_details()
+        return self.async_show_form(
+            step_id="edit_policy_rule",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_POLICY_RULE_ID): SelectSelector(
+                        SelectSelectorConfig(options=self._policy_rule_options())
+                    )
+                }
+            ),
+        )
+
+    async def async_step_edit_policy_rule_details(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        if (
+            self._policy_rule_id is None
+            or not isinstance(rules, dict)
+            or not isinstance(rules.get(self._policy_rule_id), dict)
+        ):
+            return await self.async_step_edit_policy_rule()
+        return await self._async_policy_rule_form(
+            user_input, rules[self._policy_rule_id]
+        )
+
+    async def _async_policy_rule_form(
+        self, user_input: dict[str, Any] | None, current: dict[str, Any]
+    ) -> ConfigFlowResult:
+        if self._policy_rule_id is None:
+            return await self.async_step_policy_rules()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not str(user_input.get(CONF_POLICY_RULE_NAME, "")).strip():
+                errors[CONF_POLICY_RULE_NAME] = "required"
+            elif not user_input.get(CONF_POLICY_RULE_USERS):
+                errors[CONF_POLICY_RULE_USERS] = "select_rule_user"
+            elif not user_input.get(CONF_POLICY_RULE_POLICIES):
+                errors[CONF_POLICY_RULE_POLICIES] = "select_rule_policy"
+            else:
+                self._pending_policy_rule = {
+                    CONF_POLICY_RULE_NAME: str(
+                        user_input[CONF_POLICY_RULE_NAME]
+                    ).strip(),
+                    CONF_POLICY_RULE_USERS: list(user_input[CONF_POLICY_RULE_USERS]),
+                    CONF_POLICY_RULE_MATCH: user_input[CONF_POLICY_RULE_MATCH],
+                    CONF_POLICY_RULE_PRESENCE: user_input[CONF_POLICY_RULE_PRESENCE],
+                    CONF_POLICY_RULE_ACTION: user_input[CONF_POLICY_RULE_ACTION],
+                    CONF_POLICY_RULE_POLICIES: list(
+                        user_input[CONF_POLICY_RULE_POLICIES]
+                    ),
+                    CONF_POLICY_RULE_PRIORITY: int(
+                        user_input[CONF_POLICY_RULE_PRIORITY]
+                    ),
+                    CONF_POLICY_RULE_SCHEDULE: str(
+                        user_input.get(CONF_POLICY_RULE_SCHEDULE, "")
+                    ),
+                }
+                return await self.async_step_policy_rule_preview()
+
+        policy_options = [
+            {
+                "value": policy.policy_id,
+                "label": f"{policy.expected_name or 'Policy'} ({policy.policy_id})",
+            }
+            for policy in configured_policies(self.config_entry.data)
+        ]
+        schedule_default = current.get(CONF_POLICY_RULE_SCHEDULE)
+        schedule_field = (
+            vol.Optional(CONF_POLICY_RULE_SCHEDULE, default=schedule_default)
+            if isinstance(schedule_default, str) and schedule_default
+            else vol.Optional(CONF_POLICY_RULE_SCHEDULE)
+        )
+        return self.async_show_form(
+            step_id=("edit_policy_rule_details" if current else "add_policy_rule"),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_POLICY_RULE_NAME,
+                        default=current.get(CONF_POLICY_RULE_NAME, ""),
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Required(
+                        CONF_POLICY_RULE_USERS,
+                        default=current.get(CONF_POLICY_RULE_USERS, []),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._user_options(), multiple=True
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POLICY_RULE_MATCH,
+                        default=current.get(CONF_POLICY_RULE_MATCH, RULE_MATCH_ANY),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[RULE_MATCH_ANY, RULE_MATCH_ALL],
+                            translation_key="policy_rule_match",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POLICY_RULE_PRESENCE,
+                        default=current.get(
+                            CONF_POLICY_RULE_PRESENCE, RULE_PRESENCE_HOME
+                        ),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[RULE_PRESENCE_HOME, RULE_PRESENCE_AWAY],
+                            translation_key="policy_rule_presence",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POLICY_RULE_ACTION,
+                        default=current.get(CONF_POLICY_RULE_ACTION, STATUS_DISABLE),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[STATUS_ENABLE, STATUS_DISABLE],
+                            translation_key="policy_rule_action",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POLICY_RULE_POLICIES,
+                        default=current.get(CONF_POLICY_RULE_POLICIES, []),
+                    ): SelectSelector(
+                        SelectSelectorConfig(options=policy_options, multiple=True)
+                    ),
+                    vol.Required(
+                        CONF_POLICY_RULE_PRIORITY,
+                        default=current.get(CONF_POLICY_RULE_PRIORITY, 50),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                        )
+                    ),
+                    schedule_field: EntitySelector(
+                        EntitySelectorConfig(domain="schedule")
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_policy_rule_preview(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Require an explicit confirmation after showing the exact rule effect."""
+        if self._policy_rule_id is None or self._pending_policy_rule is None:
+            return await self.async_step_policy_rules()
+        errors: dict[str, str] = {}
+        if user_input is not None and user_input.get("confirm") is True:
+            rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+            updated = dict(rules) if isinstance(rules, dict) else {}
+            updated[self._policy_rule_id] = self._pending_policy_rule
+            user_ids = set(self._user_ids())
+            policy_ids = {
+                policy.policy_id
+                for policy in configured_policies(self.config_entry.data)
+            }
+            normalized = serialize_policy_rules(updated, user_ids, policy_ids)
+            return self.async_create_entry(
+                data={
+                    **dict(self.config_entry.options),
+                    CONF_POLICY_RULES_V2: normalized,
+                }
+            )
+        if user_input is not None:
+            errors["confirm"] = "confirmation_required"
+        pending = self._pending_policy_rule
+        users = ", ".join(
+            option["label"]
+            for option in self._user_options()
+            if option["value"] in pending[CONF_POLICY_RULE_USERS]
+        )
+        policies = ", ".join(pending[CONF_POLICY_RULE_POLICIES])
+        schedule = pending.get(CONF_POLICY_RULE_SCHEDULE) or "Always"
+        current_states = "Waiting for a valid Wi-Fi update"
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        wifi = getattr(runtime, "wifi_coordinator", None)
+        if wifi is not None and wifi.last_update_success and wifi.data is not None:
+            configured_users = configured_presence_users(
+                self.config_entry.options,
+                set(self._selected_from_options()),
+                {
+                    policy.policy_id
+                    for policy in configured_policies(self.config_entry.data)
+                },
+            )
+            selected_users = set(pending[CONF_POLICY_RULE_USERS])
+            current_states = (
+                ", ".join(
+                    f"{user.name}="
+                    + (
+                        "home"
+                        if (
+                            state := aggregate_presence(
+                                user, wifi.data.presence, utcnow()
+                            )
+                        )
+                        is True
+                        else "away"
+                        if state is False
+                        else "unknown"
+                    )
+                    for user in configured_users
+                    if user.user_id in selected_users
+                )
+                or current_states
+            )
+        raw_rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        conflict = "None detected"
+        if isinstance(raw_rules, dict) and any(
+            isinstance(rule, dict)
+            and rule.get(CONF_POLICY_RULE_PRIORITY)
+            == pending[CONF_POLICY_RULE_PRIORITY]
+            and rule.get(CONF_POLICY_RULE_ACTION) != pending[CONF_POLICY_RULE_ACTION]
+            and set(rule.get(CONF_POLICY_RULE_POLICIES, []))
+            & set(pending[CONF_POLICY_RULE_POLICIES])
+            for rule_id, rule in raw_rules.items()
+            if rule_id != self._policy_rule_id
+        ):
+            conflict = (
+                "Possible equal-priority conflict; disable will win if both match"
+            )
+        return self.async_show_form(
+            step_id="policy_rule_preview",
+            data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
+            description_placeholders={
+                "name": pending[CONF_POLICY_RULE_NAME],
+                "users": users,
+                "match": pending[CONF_POLICY_RULE_MATCH],
+                "presence": pending[CONF_POLICY_RULE_PRESENCE],
+                "action": pending[CONF_POLICY_RULE_ACTION],
+                "policies": policies,
+                "priority": str(pending[CONF_POLICY_RULE_PRIORITY]),
+                "schedule": str(schedule),
+                "current_states": current_states,
+                "conflict": conflict,
+            },
+            errors=errors,
+        )
+
+    def _user_ids(self) -> list[str]:
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        return list(users) if isinstance(users, dict) else []
+
+    async def async_step_remove_policy_rules(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        if not isinstance(rules, dict) or not rules:
+            return self.async_abort(reason="no_policy_rules")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            remove = set(user_input.get(CONF_POLICY_RULES_TO_REMOVE, []))
+            if not remove:
+                errors["base"] = "select_policy_rule_to_remove"
+            else:
+                return self.async_create_entry(
+                    data={
+                        **dict(self.config_entry.options),
+                        CONF_POLICY_RULES_V2: {
+                            rule_id: rule
+                            for rule_id, rule in rules.items()
+                            if rule_id not in remove
+                        },
+                    }
+                )
+        return self.async_show_form(
+            step_id="remove_policy_rules",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_POLICY_RULES_TO_REMOVE): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._policy_rule_options(), multiple=True
                         )
                     )
                 }
@@ -800,8 +1229,22 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
 
     def _wifi_clients_form(self, errors: dict[str, str]) -> ConfigFlowResult:
         """Build the discovery form with an explicit manual-MAC fallback."""
+        name_counts: dict[str, int] = {}
+        for metadata in self._recent_clients.values():
+            hostname = metadata.get("hostname", "").strip().lower()
+            if hostname:
+                name_counts[hostname] = name_counts.get(hostname, 0) + 1
         options = [
-            {"value": mac, "label": self._client_label(mac, metadata)}
+            {
+                "value": mac,
+                "label": self._client_label(mac, metadata)
+                + (
+                    " — duplicate device name"
+                    if name_counts.get(metadata.get("hostname", "").strip().lower(), 0)
+                    > 1
+                    else ""
+                ),
+            }
             for mac, metadata in sorted(self._recent_clients.items())
         ]
         return self.async_show_form(
@@ -871,6 +1314,14 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 for policy in configured_policies(self.config_entry.data)
             },
         )
+        self._new_options[CONF_POLICY_RULES_V2] = serialize_policy_rules(
+            self._new_options.get(CONF_POLICY_RULES_V2, {}),
+            set(self._new_options[CONF_PRESENCE_USERS]),
+            {
+                policy.policy_id
+                for policy in configured_policies(self.config_entry.data)
+            },
+        )
         return self.async_create_entry(data=self._new_options)
 
     async def _async_discover_wifi_clients(
@@ -899,9 +1350,25 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         existing = self.config_entry.options.get(CONF_RECENT_WIFI_CLIENTS, {})
         recent: dict[str, dict[str, str]] = {}
         if isinstance(existing, dict):
+            cutoff = utcnow() - timedelta(
+                days=int(
+                    self.config_entry.options.get(
+                        CONF_RECENT_CLIENT_RETENTION_DAYS,
+                        DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
+                    )
+                )
+            )
             for mac, metadata in existing.items():
                 normalized = normalize_mac(mac)
                 if normalized and isinstance(metadata, dict):
+                    last_seen = metadata.get("last_seen")
+                    if isinstance(last_seen, str):
+                        try:
+                            parsed_seen = datetime.fromisoformat(last_seen)
+                            if parsed_seen.tzinfo is not None and parsed_seen < cutoff:
+                                continue
+                        except ValueError:
+                            pass
                     recent[normalized] = {
                         key: value
                         for key, value in metadata.items()
@@ -931,6 +1398,15 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             )
             if value
         )
+        if metadata.get("last_seen"):
+            details = ", ".join(
+                value
+                for value in (
+                    details,
+                    f"last seen {metadata['last_seen'][:16].replace('T', ' ')}",
+                )
+                if value
+            )
         return f"{name} ({mac})" + (f" — {details}" if details else "")
 
     def _default_name(self, mac: str) -> str:

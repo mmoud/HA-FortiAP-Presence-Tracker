@@ -3,11 +3,11 @@
   "name": "FortiAP Presence Tracker",
   "codeowners": [],
   "config_flow": true,
-  "dependencies": ["logbook"],
+  "dependencies": ["frontend", "http", "logbook", "panel_custom", "websocket_api"],
   "documentation": "https://github.com/mmoud/HA-FortiAP-Presence-Tracker",
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/mmoud/HA-FortiAP-Presence-Tracker/issues",
   "requirements": [],
-  "version": "2.2.0"
+  "version": "3.0.0"
 }

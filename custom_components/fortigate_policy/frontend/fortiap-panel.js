@@ -304,7 +304,8 @@ class FortiApPresencePanel extends HTMLElement {
 
   _icon(name) {
     const safeName = escapeHtml(name);
-    return `<img class="mdi-icon" src="${ICON_BASE}/${safeName}.svg" alt="" aria-hidden="true">`;
+    const iconVersion = escapeHtml(this._draft?.version || "current");
+    return `<img class="mdi-icon" src="${ICON_BASE}/${safeName}.svg?v=${iconVersion}" alt="" aria-hidden="true">`;
   }
 
   _peopleSummary() {

@@ -176,6 +176,7 @@ class TestPanelFrontend(unittest.TestCase):
 
         self.assertIn('ICON_BASE = "/fortiap_presence_static/icons"', source)
         self.assertIn('"view-dashboard-outline"', source)
+        self.assertIn(".svg?v=${iconVersion}", source)
         self.assertIn("metric-card ${escapeHtml(tone)}", source)
         self.assertIn("aria-current", source)
         for icon in (

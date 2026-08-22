@@ -6,6 +6,7 @@ It provides:
 
 - an optional verified switch for each configured firewall policy
 - `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
+- per-tracker rules that can enable or disable different policy sets at home and away
 - an optional sensor showing the number of associated Wi-Fi clients
 - a read-only button for immediately refreshing policy and presence data
 - full setup and configuration through the Home Assistant UI
@@ -68,10 +69,11 @@ TLS certificate verification is enabled by default. Disable it only when the For
 
 ## Wi-Fi presence tracking
 
-Open **Settings > Devices & services > FortiGate**, find the configured entry, and select **Configure**. The options menu has three actions:
+Open **Settings > Devices & services > FortiAP Presence Tracker**, find the configured entry, and select **Configure**. The options menu includes:
 
 - **Firewall policies** adds or removes optional firewall-policy switches.
 - **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
+- **Presence policy rules** assigns independent home and away policy states to each tracked device.
 - **Remove Wi-Fi trackers** deletes selected tracker entities, presence sensors, and their Home Assistant device entries without changing anything on FortiGate.
 - **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
 
@@ -111,7 +113,19 @@ Apple devices may use a private MAC address. Track the address shown by FortiGat
 
 ## Parental control
 
-The presence binary sensor and policy switch can be joined with normal Home Assistant automations. Use the binary sensor for automation triggers: `on` means the device is connected, `off` means it has remained absent for the configured grace period, and `unavailable` means FortiGate state cannot be trusted.
+The integration can apply policy states directly from presence without separate Home Assistant automations:
+
+1. Configure the firewall policies and Wi-Fi trackers first.
+2. Open **Configure > Presence policy rules**.
+3. Select a tracked device.
+4. Choose policies to enable or disable while that device is home and while it is away.
+5. Repeat for each device that needs a different policy profile.
+
+For example, one tracker can disable policy 1 while home, while another disables policies 1 and 2 while away. A profile with all four lists empty is removed.
+
+Rules are evaluated from current state rather than only on transitions. This makes them recover correctly after a restart or a manual policy change. When rules disagree about a shared policy, disable wins. If a relevant tracker has unknown presence, or the Wi-Fi API is unavailable, that policy is left unchanged. Every change still uses the normal policy preflight, status-only write, and read-back verification.
+
+The presence entities and policy switches remain available for normal Home Assistant automations when more complex conditions are required.
 
 See [Parental control with FortiGate](docs/parental-control.md) for setup, single-device and multi-device examples, policy direction, failure behavior, and testing.
 

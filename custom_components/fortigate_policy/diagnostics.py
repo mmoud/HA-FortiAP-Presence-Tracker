@@ -26,6 +26,7 @@ async def async_get_config_entry_diagnostics(
     """Return useful aggregate Wi-Fi diagnostics without client identities."""
     runtime = entry.runtime_data
     wifi = runtime.wifi_coordinator
+    rule_manager = runtime.rule_manager
     tracked = entry.options.get(CONF_TRACKED_CLIENTS, {})
     return async_redact_data(
         {
@@ -65,6 +66,27 @@ async def async_get_config_entry_diagnostics(
                 "fortios_version": (
                     wifi.data.fortios_version if wifi and wifi.data else None
                 ),
+            },
+            "presence_policy_rules": {
+                "configured_rule_count": (
+                    len(rule_manager.rules) if rule_manager else 0
+                ),
+                "last_reconcile": (
+                    rule_manager.last_reconcile.isoformat()
+                    if rule_manager and rule_manager.last_reconcile
+                    else None
+                ),
+                "blocked_policy_count": (
+                    len(rule_manager.last_result.blocked_unknown)
+                    if rule_manager and rule_manager.last_result
+                    else 0
+                ),
+                "conflict_policy_count": (
+                    len(rule_manager.last_result.conflicts)
+                    if rule_manager and rule_manager.last_result
+                    else 0
+                ),
+                "last_error": rule_manager.last_error if rule_manager else None,
             },
         },
         TO_REDACT,

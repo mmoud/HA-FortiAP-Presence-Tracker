@@ -82,12 +82,27 @@ class FortiGatePolicySwitch(
         """Expose useful non-sensitive policy metadata."""
         policy = self.coordinator.data
         checked = self.coordinator.last_successful_check
+        runtime = getattr(self._entry, "runtime_data", None)
+        rule_manager = getattr(runtime, "rule_manager", None)
+        managed_by_rule = bool(
+            rule_manager
+            and any(
+                self._policy_id in rule.affected_policies for rule in rule_manager.rules
+            )
+        )
+        desired_by_rule = (
+            rule_manager.last_result.desired.get(self._policy_id)
+            if rule_manager and rule_manager.last_result
+            else None
+        )
         return {
             "policy_id": policy.policy_id if policy else self._policy_id,
             "policy_name": policy.name if policy else None,
             "vdom": self._entry.data[CONF_VDOM],
             "fortigate": self._entry.data[CONF_HOST],
             "last_successful_check": checked.isoformat() if checked else None,
+            "presence_rule_managed": managed_by_rule,
+            "presence_rule_desired": desired_by_rule,
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:

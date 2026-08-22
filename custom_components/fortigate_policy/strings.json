@@ -42,6 +42,7 @@
     },
     "abort": {
       "already_configured": "This FortiGate policy is already configured.",
+      "no_trackers": "There are no configured Wi-Fi trackers to remove.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -50,7 +51,8 @@
       "cannot_connect": "Cannot reach FortiGate, its TLS certificate could not be verified, or it returned unexpected JSON.",
       "invalid_auth": "FortiGate rejected the token or its permissions.",
       "not_found": "The Wi-Fi monitor endpoint, VDOM, or configured policy was not found.",
-      "select_at_least_one": "Select a discovered device or enter at least one valid MAC address."
+      "select_at_least_one": "Select a discovered device or enter at least one valid MAC address.",
+      "select_tracker_to_remove": "Select at least one tracker to remove."
     },
     "step": {
       "init": {
@@ -59,6 +61,7 @@
         "menu_options": {
           "firewall_policies": "Firewall policies",
           "wifi_clients": "Add or manage Wi-Fi trackers",
+          "remove_wifi_trackers": "Remove Wi-Fi trackers",
           "wifi_settings": "Polling and sensors"
         }
       },
@@ -92,6 +95,13 @@
         "data_description": {
           "selected_wifi_clients": "The list includes currently connected clients, recently seen clients, and existing offline trackers.",
           "manual_wifi_macs": "Use this when a device is offline or does not appear in FortiGate discovery. Example: AA:BB:CC:DD:EE:FF"
+        }
+      },
+      "remove_wifi_trackers": {
+        "title": "Remove Wi-Fi trackers",
+        "description": "Selected trackers, presence sensors, and their Home Assistant device entries will be removed. This does not affect the client or any FortiGate configuration.",
+        "data": {
+          "wifi_trackers_to_remove": "Trackers to remove"
         }
       },
       "wifi_client_name": {

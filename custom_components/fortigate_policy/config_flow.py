@@ -392,6 +392,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
 
     _SELECTED_CLIENTS = "selected_wifi_clients"
     _MANUAL_MACS = "manual_wifi_macs"
+    _TRACKERS_TO_REMOVE = "wifi_trackers_to_remove"
 
     def __init__(self) -> None:
         """Keep state during the select-then-name native options flow."""
@@ -406,10 +407,66 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         """Show clear entry points for trackers and advanced settings."""
         tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
         tracked_count = len(tracked) if isinstance(tracked, dict) else 0
+        menu_options = ["firewall_policies", "wifi_clients"]
+        if tracked_count:
+            menu_options.append("remove_wifi_trackers")
+        menu_options.append("wifi_settings")
         return self.async_show_menu(
             step_id="init",
-            menu_options=["firewall_policies", "wifi_clients", "wifi_settings"],
+            menu_options=menu_options,
             description_placeholders={"tracked": str(tracked_count)},
+        )
+
+    async def async_step_remove_wifi_trackers(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Permanently remove selected tracker entities and devices on reload."""
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        if not isinstance(tracked, dict) or not tracked:
+            return self.async_abort(reason="no_trackers")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            remove = {
+                normalized
+                for value in user_input.get(self._TRACKERS_TO_REMOVE, [])
+                if (normalized := normalize_mac(value)) is not None
+            }
+            if not remove:
+                errors["base"] = "select_tracker_to_remove"
+            else:
+                remaining = {
+                    mac: metadata
+                    for mac, metadata in tracked.items()
+                    if normalize_mac(mac) not in remove
+                }
+                return self.async_create_entry(
+                    data={
+                        **dict(self.config_entry.options),
+                        CONF_TRACKED_CLIENTS: remaining,
+                    }
+                )
+
+        options = [
+            {
+                "value": mac,
+                "label": (
+                    f"{metadata.get(CONF_FRIENDLY_NAME, mac)} ({mac})"
+                    if isinstance(metadata, dict)
+                    else mac
+                ),
+            }
+            for mac, metadata in sorted(tracked.items())
+        ]
+        return self.async_show_form(
+            step_id="remove_wifi_trackers",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(self._TRACKERS_TO_REMOVE): SelectSelector(
+                        SelectSelectorConfig(options=options, multiple=True)
+                    )
+                }
+            ),
+            errors=errors,
         )
 
     async def async_step_firewall_policies(

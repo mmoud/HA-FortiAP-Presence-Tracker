@@ -10,6 +10,8 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FortiGatePolicyApi
@@ -27,6 +29,7 @@ from .const import (
     DEFAULT_WIFI_AWAY_GRACE_PERIOD,
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
+    DOMAIN,
 )
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
 from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
@@ -62,6 +65,44 @@ def tracked_macs_from_options(options: Mapping[str, Any]) -> set[str]:
         for mac in raw_clients
         if (normalized := normalize_mac(mac)) is not None
     }
+
+
+def _cleanup_stale_wifi_registry_entries(
+    hass: HomeAssistant, entry_id: str, tracked_macs: set[str]
+) -> None:
+    """Remove tracker entities and devices no longer selected in Options."""
+    prefix = f"{entry_id}_wifi_"
+    retained_entity_unique_ids = {
+        unique_id
+        for mac in tracked_macs
+        for unique_id in (
+            f"{prefix}{mac.replace(':', '')}",
+            f"{prefix}{mac.replace(':', '')}_presence",
+        )
+    }
+    entity_registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(entity_registry, entry_id):
+        if (
+            entity.platform == DOMAIN
+            and entity.unique_id.startswith(prefix)
+            and entity.unique_id not in retained_entity_unique_ids
+        ):
+            entity_registry.async_remove(entity.entity_id)
+
+    retained_device_identifiers = {
+        f"{prefix}{mac.replace(':', '')}" for mac in tracked_macs
+    }
+    device_registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(device_registry, entry_id):
+        wifi_identifiers = {
+            identifier
+            for domain, identifier in device.identifiers
+            if domain == DOMAIN and identifier.startswith(prefix)
+        }
+        if wifi_identifiers and wifi_identifiers.isdisjoint(
+            retained_device_identifiers
+        ):
+            device_registry.async_remove_device(device.id)
 
 
 async def async_setup_entry(
@@ -112,6 +153,7 @@ async def async_setup_entry(
 
     wifi_coordinator: FortiGateWifiCoordinator | None = None
     tracked_macs = tracked_macs_from_options(entry.options)
+    _cleanup_stale_wifi_registry_entries(hass, entry.entry_id, tracked_macs)
     if entry.options.get(
         CONF_WIFI_TRACKING_ENABLED, DEFAULT_WIFI_TRACKING_ENABLED
     ) and (tracked_macs or entry.options.get(CONF_WIFI_CLIENT_COUNT_SENSOR, False)):

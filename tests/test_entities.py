@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 from homeassistant.const import CONF_HOST, CONF_PORT
 
-from custom_components.fortigate_policy import async_setup_entry
+from custom_components.fortigate_policy import (
+    _cleanup_stale_wifi_registry_entries,
+    async_setup_entry,
+)
 from custom_components.fortigate_policy.api import Policy
 from custom_components.fortigate_policy.binary_sensor import (
     FortiGateWifiPresenceBinarySensor,
@@ -106,6 +109,88 @@ class TestWifiTrackerOptions(unittest.TestCase):
             ),
         )
 
+    def test_removed_tracker_entities_and_device_are_deleted_from_registries(
+        self,
+    ) -> None:
+        current_compact = MAC.replace(":", "")
+        removed_compact = "112233445566"
+        entity_registry = SimpleNamespace(
+            removed=[],
+            async_remove=lambda entity_id: entity_registry.removed.append(entity_id),
+        )
+        device_registry = SimpleNamespace(
+            removed=[],
+            async_remove_device=lambda device_id: device_registry.removed.append(
+                device_id
+            ),
+        )
+        entities = [
+            SimpleNamespace(
+                entity_id="device_tracker.current",
+                platform="fortigate_policy",
+                unique_id=f"entry-1_wifi_{current_compact}",
+            ),
+            SimpleNamespace(
+                entity_id="device_tracker.removed",
+                platform="fortigate_policy",
+                unique_id=f"entry-1_wifi_{removed_compact}",
+            ),
+            SimpleNamespace(
+                entity_id="binary_sensor.removed_presence",
+                platform="fortigate_policy",
+                unique_id=f"entry-1_wifi_{removed_compact}_presence",
+            ),
+            SimpleNamespace(
+                entity_id="switch.policy",
+                platform="fortigate_policy",
+                unique_id="entry-1",
+            ),
+        ]
+        devices = [
+            SimpleNamespace(
+                id="current-device",
+                identifiers={("fortigate_policy", f"entry-1_wifi_{current_compact}")},
+            ),
+            SimpleNamespace(
+                id="removed-device",
+                identifiers={("fortigate_policy", f"entry-1_wifi_{removed_compact}")},
+            ),
+            SimpleNamespace(
+                id="fortigate-device",
+                identifiers={("fortigate_policy", "entry-1")},
+            ),
+        ]
+
+        with (
+            patch(
+                "custom_components.fortigate_policy.er.async_get",
+                return_value=entity_registry,
+            ),
+            patch(
+                "custom_components.fortigate_policy.er.async_entries_for_config_entry",
+                return_value=entities,
+            ),
+            patch(
+                "custom_components.fortigate_policy.dr.async_get",
+                return_value=device_registry,
+            ),
+            patch(
+                "custom_components.fortigate_policy.dr.async_entries_for_config_entry",
+                return_value=devices,
+            ),
+        ):
+            _cleanup_stale_wifi_registry_entries(
+                SimpleNamespace(),
+                "entry-1",
+                {MAC},  # type: ignore[arg-type]
+            )
+
+        self.assertEqual(
+            ["device_tracker.removed", "binary_sensor.removed_presence"],
+            entity_registry.removed,
+        )
+        self.assertEqual(["removed-device"], device_registry.removed)
+
     def test_existing_names_are_preserved_only_for_selected_trackers(self) -> None:
         self.assertEqual(
             {"aa:bb:cc:dd:ee:ff": {CONF_FRIENDLY_NAME: "Example phone"}},
@@ -136,6 +221,7 @@ class TestPolicyOptions(unittest.TestCase):
         config_entries = FakeConfigEntries()
         hass = SimpleNamespace(config_entries=config_entries)
         entry = SimpleNamespace(
+            entry_id="entry-1",
             data={
                 CONF_HOST: "fortigate.example.test",
                 CONF_PORT: 443,
@@ -147,9 +233,14 @@ class TestPolicyOptions(unittest.TestCase):
             options={},
         )
 
-        with patch(
-            "custom_components.fortigate_policy.async_get_clientsession",
-            return_value=FakeSession([]),
+        with (
+            patch(
+                "custom_components.fortigate_policy.async_get_clientsession",
+                return_value=FakeSession([]),
+            ),
+            patch(
+                "custom_components.fortigate_policy._cleanup_stale_wifi_registry_entries"
+            ),
         ):
             result = asyncio.run(async_setup_entry(hass, entry))  # type: ignore[arg-type]
 

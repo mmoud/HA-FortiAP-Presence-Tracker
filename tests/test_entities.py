@@ -26,6 +26,7 @@ from custom_components.fortigate_policy.config_flow import (
     _entry_data,
     _normalize,
     _options_hub_summary,
+    _people_overview,
     _policy_options_schema,
     _preserved_client_names,
     _selected_wifi_macs,
@@ -345,6 +346,73 @@ class TestPolicyOptions(unittest.TestCase):
         self.assertEqual(
             [{"value": second_mac, "label": f"New watch ({second_mac})"}],
             flow._unassigned_tracker_options(),
+        )
+
+    def test_guided_setup_explains_policy_requirement(self) -> None:
+        flow = self._options_flow(
+            SimpleNamespace(
+                data={CONF_POLICIES: []},
+                options={CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}}},
+            )
+        )
+
+        result = asyncio.run(flow.async_step_guided_parental_control())
+
+        self.assertEqual("guided_policy_required", result["step_id"])
+        self.assertEqual(
+            ["firewall_policies", "presence_users"], result["menu_options"]
+        )
+
+    def test_people_overview_lists_people_and_friendly_device_names(self) -> None:
+        second_mac = "11:22:33:44:55:66"
+        overview = _people_overview(
+            {
+                CONF_TRACKED_CLIENTS: {
+                    MAC: {CONF_FRIENDLY_NAME: "Phone"},
+                    second_mac: {CONF_FRIENDLY_NAME: "Watch"},
+                },
+                CONF_PRESENCE_USERS: {
+                    "person-1": {
+                        CONF_PRESENCE_USER_NAME: "Example person",
+                        CONF_PRESENCE_USER_MACS: [MAC, second_mac],
+                        CONF_USER_AWAY_GRACE_PERIOD: 240,
+                    }
+                },
+            }
+        )
+
+        self.assertEqual("1", overview["count"])
+        self.assertEqual(
+            "• Example person: Phone, Watch · Away grace 240s",
+            overview["people"],
+        )
+
+    def test_people_and_devices_menu_includes_read_only_overview(self) -> None:
+        flow = self._options_flow(
+            SimpleNamespace(
+                data={CONF_POLICIES: []},
+                options={
+                    CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}},
+                    CONF_PRESENCE_USERS: {
+                        "person-1": {
+                            CONF_PRESENCE_USER_NAME: "Example person",
+                            CONF_PRESENCE_USER_MACS: [MAC],
+                        }
+                    },
+                },
+            )
+        )
+
+        result = asyncio.run(flow.async_step_people_devices())
+
+        self.assertEqual(
+            [
+                "wifi_clients",
+                "view_presence_users",
+                "presence_users",
+                "remove_wifi_trackers",
+            ],
+            result["menu_options"],
         )
 
     def test_guided_setup_saves_person_and_rule_only_after_confirmation(self) -> None:

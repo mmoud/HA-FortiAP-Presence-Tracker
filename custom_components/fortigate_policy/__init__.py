@@ -82,6 +82,16 @@ async def async_setup_entry(
         )
         for policy in policy_definitions
     }
+    wifi_api = FortiGatePolicyApi(
+        session,
+        host=entry.data[CONF_HOST],
+        port=entry.data[CONF_PORT],
+        vdom=entry.data[CONF_VDOM],
+        policy_id="",
+        expected_policy_name="",
+        token=entry.data[CONF_API_TOKEN],
+        verify_ssl=entry.data[CONF_VERIFY_SSL],
+    )
     policy_coordinators = {
         policy_id: FortiGatePolicyCoordinator(
             hass,
@@ -107,7 +117,7 @@ async def async_setup_entry(
         wifi_coordinator = FortiGateWifiCoordinator(
             hass,
             entry,
-            next(iter(policy_apis.values())),
+            wifi_api,
             tracked_macs,
             entry.options.get(CONF_WIFI_POLL_INTERVAL, DEFAULT_WIFI_POLL_INTERVAL),
             entry.options.get(
@@ -129,17 +139,17 @@ async def async_migrate_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
     """Migrate entries without changing entity identity."""
-    if entry.version > 3:
+    if entry.version > 4:
         return False
     data = dict(entry.data)
     if entry.version == 1:
         data = migrate_v1_data(data)
-    if entry.version < 3:
+    if entry.version < 4:
         hass.config_entries.async_update_entry(
             entry,
             data=data,
             title=fortigate_entry_title(data),
-            version=3,
+            version=4,
         )
     return True
 

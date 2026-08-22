@@ -4,7 +4,7 @@ Home Assistant integration for controlling FortiGate firewall policies and track
 
 It provides:
 
-- one verified switch for each configured firewall policy
+- an optional verified switch for each configured firewall policy
 - `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
 - an optional sensor showing the number of associated Wi-Fi clients
 - full setup and configuration through the Home Assistant UI
@@ -28,7 +28,7 @@ No YAML configuration is required.
 
 ## FortiGate API account
 
-Create a dedicated REST API administrator, for example `homeassistant-api`. Give it read/write access to firewall policies in the required VDOM. Wi-Fi tracking also needs read access to Wireless Controller monitor data.
+Create a dedicated REST API administrator, for example `homeassistant-api`. Tracker-only installations need read access to Wireless Controller monitor data. Firewall-policy switches additionally require read/write access to firewall policies in the required VDOM.
 
 FortiOS permission profiles are generally scoped to configuration areas, not to one policy ID. Use the integration's expected-policy-name check as an additional safeguard, and restrict the API administrator's trusted hosts to the Home Assistant IP where possible.
 
@@ -36,9 +36,9 @@ Keep the FortiGate management interface on a private network. Do not expose it t
 
 ## Policy switch
 
-The setup form requires the FortiGate host, HTTPS port, VDOM, policy IDs, API token, and TLS verification setting. Enter one policy ID or a comma-separated list such as `61, 72, 83`.
+The setup form requires the FortiGate host, HTTPS port, VDOM, API token, and TLS verification setting. Firewall policy IDs are optional: leave the field empty for Wi-Fi tracking only, or enter one ID or a comma-separated list such as `61, 72, 83`.
 
-Each ID is read before the entry is saved. The returned policy name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. Adding or removing IDs later is done with the integration's **Reconfigure** action.
+Each supplied ID is read before the entry is saved. The returned policy name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. Add, remove, or clear IDs later with **Configure > Firewall policies**.
 
 The switch uses these endpoints:
 
@@ -65,8 +65,9 @@ TLS certificate verification is enabled by default. Disable it only when the For
 
 ## Wi-Fi presence tracking
 
-Open **Settings > Devices & services > FortiGate**, find the configured entry, and select **Configure**. The options menu has two clear actions:
+Open **Settings > Devices & services > FortiGate**, find the configured entry, and select **Configure**. The options menu has three actions:
 
+- **Firewall policies** adds or removes optional firewall-policy switches.
 - **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
 - **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
 

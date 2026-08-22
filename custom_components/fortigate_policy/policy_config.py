@@ -49,6 +49,15 @@ def parse_policy_ids(value: object) -> tuple[str, ...]:
     return tuple(policy_ids)
 
 
+def parse_optional_policy_ids(value: object) -> tuple[str, ...]:
+    """Parse policy IDs while allowing a tracker-only empty selection."""
+    if not isinstance(value, str):
+        raise TypeError("Policy IDs must be text")
+    if not value.strip():
+        return ()
+    return parse_policy_ids(value)
+
+
 def configured_policies(data: Mapping[str, Any]) -> tuple[PolicyDefinition, ...]:
     """Read the current policy list or a version-1 single-policy entry."""
     raw_policies = data.get(CONF_POLICIES)
@@ -61,7 +70,7 @@ def configured_policies(data: Mapping[str, Any]) -> tuple[PolicyDefinition, ...]
             expected_name = raw.get(CONF_POLICY_NAME, "")
             if policy_id.isdigit() and isinstance(expected_name, str):
                 policies.append(PolicyDefinition(policy_id, expected_name.strip()))
-    if policies:
+    if isinstance(raw_policies, list):
         return tuple(policies)
 
     policy_id = str(data.get(CONF_POLICY_ID, "")).strip()

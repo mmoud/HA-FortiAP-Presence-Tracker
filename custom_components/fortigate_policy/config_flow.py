@@ -64,7 +64,7 @@ from .policy_config import (
     PolicyDefinition,
     configured_policies,
     fortigate_entry_title,
-    parse_policy_ids,
+    parse_optional_policy_ids,
     serialize_policies,
 )
 from .wifi import FortiGateWifiClient, normalize_mac, utcnow
@@ -82,7 +82,7 @@ def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
             vol.Required(CONF_VDOM, default=defaults.get(CONF_VDOM, DEFAULT_VDOM)): str,
-            vol.Required(
+            vol.Optional(
                 CONF_POLICY_IDS, default=defaults.get(CONF_POLICY_IDS, "")
             ): str,
             vol.Required(
@@ -144,7 +144,7 @@ def _policy_options_schema(data: dict[str, Any]) -> vol.Schema:
     policy_ids = ", ".join(policy.policy_id for policy in configured_policies(data))
     return vol.Schema(
         {
-            vol.Required(CONF_POLICY_IDS, default=policy_ids): TextSelector(
+            vol.Optional(CONF_POLICY_IDS, default=policy_ids): TextSelector(
                 TextSelectorConfig()
             )
         }
@@ -190,7 +190,7 @@ def _normalize(user_input: dict[str, Any]) -> dict[str, Any]:
     data = dict(user_input)
     data[CONF_HOST] = data[CONF_HOST].strip()
     data[CONF_VDOM] = data[CONF_VDOM].strip()
-    policy_ids = parse_policy_ids(data[CONF_POLICY_IDS])
+    policy_ids = parse_optional_policy_ids(data.get(CONF_POLICY_IDS, ""))
     data[CONF_POLICY_IDS] = ", ".join(policy_ids)
     data[CONF_API_TOKEN] = data[CONF_API_TOKEN].strip()
     if (
@@ -227,18 +227,26 @@ async def _async_validate_input(
 ) -> tuple[tuple[PolicyDefinition, ...], str]:
     """Validate every requested policy and capture its current name guard."""
     policies: list[PolicyDefinition] = []
-    for policy_id in parse_policy_ids(data[CONF_POLICY_IDS]):
+    policy_ids = parse_optional_policy_ids(data.get(CONF_POLICY_IDS, ""))
+    for policy_id in policy_ids:
         policy = await _api_for_policy(hass, data, policy_id, "").async_get_policy()
         policies.append(PolicyDefinition(policy.policy_id, policy.name))
+    if not policy_ids:
+        # A tracker-only entry still proves host, TLS, VDOM, token, and Wi-Fi
+        # monitor access before it is saved.
+        await _api_for_policy(hass, data, "", "").async_get_wifi_clients()
     return tuple(policies), fortigate_entry_title(data)
 
 
 async def _async_validate_entry_data(hass: HomeAssistant, data: dict[str, Any]) -> None:
     """Validate all saved policy identity guards, for token reauthentication."""
-    for policy in configured_policies(data):
+    policies = configured_policies(data)
+    for policy in policies:
         await _api_for_policy(
             hass, data, policy.policy_id, policy.expected_name
         ).async_get_policy()
+    if not policies:
+        await _api_for_policy(hass, data, "", "").async_get_wifi_clients()
 
 
 def _entry_data(
@@ -266,7 +274,7 @@ def _error_key(err: Exception) -> str:
 class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure the integration entirely through Home Assistant's UI."""
 
-    VERSION = 3
+    VERSION = 4
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -321,7 +329,10 @@ class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
                 # policy response does not provide a hardware-stable identifier.
                 # The initial flow prevents duplicate endpoint/VDOM/policy tuples.
                 updated_data = _entry_data(data, policies)
-                if legacy_primary := entry.data.get(CONF_LEGACY_PRIMARY_POLICY_ID):
+                legacy_primary = entry.data.get(CONF_LEGACY_PRIMARY_POLICY_ID)
+                if legacy_primary and any(
+                    policy.policy_id == legacy_primary for policy in policies
+                ):
                     updated_data[CONF_LEGACY_PRIMARY_POLICY_ID] = legacy_primary
                 self.hass.config_entries.async_update_entry(
                     entry, title=fortigate_entry_title(updated_data)
@@ -553,8 +564,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
     ) -> tuple[dict[str, FortiGateWifiClient], int, str | None]:
         """Reuse the integration's authenticated FortiGate API client."""
         data = self.config_entry.data
-        policy = configured_policies(data)[0]
-        api = _api_for_policy(self.hass, data, policy.policy_id, policy.expected_name)
+        api = _api_for_policy(self.hass, data, "", "")
         return await api.async_get_wifi_client_catalog()
 
     def _selected_from_options(self) -> list[str]:

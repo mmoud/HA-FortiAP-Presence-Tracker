@@ -76,7 +76,7 @@ Open **Settings > Devices & services > FortiAP Presence Tracker**, find the conf
 The hub is organized by task:
 
 - **Guided policy-based parental control** creates a person and one firewall-policy rule in three reviewed steps: person and devices, policy behavior, then confirmation. Because this workflow automates a firewall policy, it requires at least one configured policy. The UI links to presence-only setup when policy control is not wanted.
-- **People and devices** discovers clients, provides a read-only overview of every person and assigned device, manages tracked devices, and combines a person's phone, watch, tablet, or other devices.
+- **People and devices** displays every person and assigned device directly on its landing page, discovers clients, manages tracked devices, and combines a person's phone, watch, tablet, or other devices.
 - **Parental-control rules** creates or edits prioritized firewall actions.
 - **Firewall policies** adds or removes optional verified policy switches.
 - **Advanced settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
@@ -93,6 +93,8 @@ On the tracker screen, enable Wi-Fi presence tracking, select one or more device
 Both entities use the same coordinator result and away grace period. The binary sensor does not add another FortiGate request.
 
 Under **People and devices > Manage people**, assign a phone, watch, tablet, or other selected trackers to one person. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The person is home as soon as any assigned device is home. The person becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the person is unavailable rather than away.
+
+The **People and devices** landing page lists all people and their assignments without opening an edit form. If every tracked device is already assigned, guided parental-control setup asks which existing person the new rule should follow instead of requiring another tracker.
 
 Each user has its own away grace period. This can extend the base device grace for phones or watches that sleep aggressively. A device can belong to only one user, preventing accidental duplicate presence profiles.
 

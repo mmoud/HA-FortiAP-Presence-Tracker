@@ -48,6 +48,7 @@ from custom_components.fortigate_policy.const import (
     CONF_POLICY_RULE_SCHEDULE,
     CONF_POLICY_RULE_USERS,
     CONF_POLICY_RULES_V2,
+    CONF_PRESENCE_USER_ID,
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
@@ -387,7 +388,7 @@ class TestPolicyOptions(unittest.TestCase):
             overview["people"],
         )
 
-    def test_people_and_devices_menu_includes_read_only_overview(self) -> None:
+    def test_people_and_devices_page_includes_read_only_overview(self) -> None:
         flow = self._options_flow(
             SimpleNamespace(
                 data={CONF_POLICIES: []},
@@ -406,14 +407,39 @@ class TestPolicyOptions(unittest.TestCase):
         result = asyncio.run(flow.async_step_people_devices())
 
         self.assertEqual(
-            [
-                "wifi_clients",
-                "view_presence_users",
-                "presence_users",
-                "remove_wifi_trackers",
-            ],
+            ["wifi_clients", "presence_users", "remove_wifi_trackers"],
             result["menu_options"],
         )
+        self.assertEqual(
+            "• Example person: Phone · Away grace 180s",
+            result["description_placeholders"]["people"],
+        )
+
+    def test_guided_setup_uses_existing_person_when_all_devices_assigned(self) -> None:
+        entry = SimpleNamespace(
+            data={CONF_POLICIES: [{"policy_id": "61", "policy_name": "Access"}]},
+            options={
+                CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}},
+                CONF_PRESENCE_USERS: {
+                    "person-1": {
+                        CONF_PRESENCE_USER_NAME: "Example person",
+                        CONF_PRESENCE_USER_MACS: [MAC],
+                    }
+                },
+            },
+        )
+        flow = self._options_flow(entry)
+
+        choose_result = asyncio.run(flow.async_step_guided_parental_control())
+        self.assertEqual("guided_existing_person", choose_result["step_id"])
+
+        policy_result = asyncio.run(
+            flow.async_step_guided_existing_person({CONF_PRESENCE_USER_ID: "person-1"})
+        )
+        self.assertEqual("guided_policy", policy_result["step_id"])
+        defaults = policy_result["data_schema"]({CONF_POLICY_RULE_POLICIES: ["61"]})
+        self.assertEqual("Example person policy", defaults[CONF_POLICY_RULE_NAME])
+        self.assertEqual({"person-1"}, set(entry.options[CONF_PRESENCE_USERS]))
 
     def test_guided_setup_saves_person_and_rule_only_after_confirmation(self) -> None:
         entry = SimpleNamespace(

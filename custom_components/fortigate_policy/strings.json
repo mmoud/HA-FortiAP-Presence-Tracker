@@ -46,6 +46,7 @@
       "no_policies": "There are no configured firewall policies.",
       "no_presence_users": "There are no configured presence users.",
       "no_policy_rules": "There are no configured policy rules.",
+      "all_trackers_assigned": "Every tracked device already belongs to a person. Add another tracked device or create a rule for an existing person.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -69,7 +70,7 @@
     "step": {
       "init": {
         "title": "FortiAP Presence Tracker",
-        "description": "Current setup: {tracked} tracked devices, {users} people, {rules} parental-control rules, and {policies} firewall policies. Automatic enforcement: {automation}.",
+        "description": "Tracked devices: {tracked} · People: {users} · Parental-control rules: {rules} · Firewall policies: {policies}. Automatic enforcement: {automation}.",
         "menu_options": {
           "guided_parental_control": "Guided parental-control setup",
           "people_devices": "People and devices",

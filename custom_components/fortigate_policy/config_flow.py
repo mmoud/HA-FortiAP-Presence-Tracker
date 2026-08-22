@@ -584,6 +584,8 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             return await self.async_step_wifi_clients()
         if not configured_policies(self.config_entry.data):
             return await self.async_step_firewall_policies()
+        if not self._unassigned_tracker_options():
+            return self.async_abort(reason="all_trackers_assigned")
         self._presence_user_id = self._presence_user_id or uuid4().hex
         return await self.async_step_guided_person(user_input)
 
@@ -601,16 +603,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 for mac in user_input.get(CONF_PRESENCE_USER_MACS, [])
                 if (normalized := normalize_mac(mac)) is not None
             }
-            existing = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-            assigned = {
-                normalized
-                for raw_user in (
-                    existing.values() if isinstance(existing, dict) else []
-                )
-                if isinstance(raw_user, dict)
-                for mac in raw_user.get(CONF_PRESENCE_USER_MACS, [])
-                if (normalized := normalize_mac(mac)) is not None
-            }
+            assigned = self._assigned_tracker_macs()
             if not name:
                 errors[CONF_PRESENCE_USER_NAME] = "required"
             elif not selected_macs:
@@ -636,9 +629,9 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     vol.Required(CONF_PRESENCE_USER_NAME): TextSelector(
                         TextSelectorConfig()
                     ),
-                    vol.Required(CONF_PRESENCE_USER_MACS): SelectSelector(
+                    vol.Required(CONF_PRESENCE_USER_MACS, default=[]): SelectSelector(
                         SelectSelectorConfig(
-                            options=self._tracker_options(), multiple=True
+                            options=self._unassigned_tracker_options(), multiple=True
                         )
                     ),
                     vol.Required(
@@ -893,6 +886,26 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             }
             for mac, metadata in sorted(tracked.items())
             if normalize_mac(mac) is not None
+        ]
+
+    def _assigned_tracker_macs(self) -> set[str]:
+        """Return MACs already owned by a configured person."""
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        return {
+            normalized
+            for raw_user in (users.values() if isinstance(users, dict) else [])
+            if isinstance(raw_user, dict)
+            for mac in raw_user.get(CONF_PRESENCE_USER_MACS, [])
+            if (normalized := normalize_mac(mac)) is not None
+        }
+
+    def _unassigned_tracker_options(self) -> list[dict[str, str]]:
+        """Offer only devices that can safely belong to a new person."""
+        assigned = self._assigned_tracker_macs()
+        return [
+            option
+            for option in self._tracker_options()
+            if normalize_mac(option["value"]) not in assigned
         ]
 
     def _user_options(self) -> list[dict[str, str]]:

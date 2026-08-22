@@ -327,6 +327,26 @@ class TestPolicyOptions(unittest.TestCase):
             result["menu_options"],
         )
 
+    def test_guided_setup_offers_only_unassigned_devices(self) -> None:
+        second_mac = "11:22:33:44:55:66"
+        flow = self._options_flow(
+            SimpleNamespace(
+                data={CONF_POLICIES: []},
+                options={
+                    CONF_TRACKED_CLIENTS: {
+                        MAC: {CONF_FRIENDLY_NAME: "Assigned phone"},
+                        second_mac: {CONF_FRIENDLY_NAME: "New watch"},
+                    },
+                    CONF_PRESENCE_USERS: {"person-1": {CONF_PRESENCE_USER_MACS: [MAC]}},
+                },
+            )
+        )
+
+        self.assertEqual(
+            [{"value": second_mac, "label": f"New watch ({second_mac})"}],
+            flow._unassigned_tracker_options(),
+        )
+
     def test_guided_setup_saves_person_and_rule_only_after_confirmation(self) -> None:
         entry = SimpleNamespace(
             data={CONF_POLICIES: [{"policy_id": "61", "policy_name": "Family access"}]},

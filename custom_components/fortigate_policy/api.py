@@ -198,7 +198,10 @@ class FortiGatePolicyApi:
             for url in urls:
                 try:
                     payload = await self._async_request(
-                        "GET", url, allow_monitor_json_fallback=True
+                        "GET",
+                        url,
+                        allow_monitor_json_fallback=True,
+                        quiet_errors=True,
                     )
                     identities = parse_client_identities(payload, source)
                 except FortiGateNotFoundError:
@@ -257,8 +260,10 @@ class FortiGatePolicyApi:
         *,
         json: dict[str, Any] | None = None,
         allow_monitor_json_fallback: bool = False,
+        quiet_errors: bool = False,
     ) -> Mapping[str, Any]:
         """Make one request without logging credentials or response data."""
+        log_failure = _LOGGER.debug if quiet_errors else _LOGGER.warning
         try:
             async with self._session.request(
                 method,
@@ -275,7 +280,7 @@ class FortiGatePolicyApi:
                         "FortiGate policy resource was not found"
                     )
                 if response.status != 200:
-                    _LOGGER.warning(
+                    log_failure(
                         "FortiGate API request failed: %s %s returned HTTP %s "
                         "(content type %s)",
                         method,
@@ -304,7 +309,7 @@ class FortiGatePolicyApi:
                                 strict=False,
                             )
                         except (UnicodeError, ValueError) as fallback_err:
-                            _LOGGER.warning(
+                            log_failure(
                                 "FortiGate monitor response was not decodable "
                                 "JSON: %s %s (%s, %s bytes)",
                                 method,
@@ -323,7 +328,7 @@ class FortiGatePolicyApi:
                             len(raw_payload),
                         )
                     else:
-                        _LOGGER.warning(
+                        log_failure(
                             "FortiGate API response was not JSON: %s %s "
                             "(content type %s)",
                             method,
@@ -334,7 +339,7 @@ class FortiGatePolicyApi:
                             "FortiGate returned invalid JSON"
                         ) from err
                 except asyncio.TimeoutError as err:
-                    _LOGGER.warning(
+                    log_failure(
                         "FortiGate API response was not JSON: %s %s (content type %s)",
                         method,
                         url.path,
@@ -346,7 +351,7 @@ class FortiGatePolicyApi:
         except FortiGateError:
             raise
         except (ClientError, TimeoutError, asyncio.TimeoutError) as err:
-            _LOGGER.warning(
+            log_failure(
                 "FortiGate API connection failed: %s %s (%s)",
                 method,
                 url.path,
@@ -355,7 +360,7 @@ class FortiGatePolicyApi:
             raise FortiGateConnectionError("Unable to contact FortiGate") from err
 
         if not isinstance(payload, Mapping):
-            _LOGGER.warning(
+            log_failure(
                 "FortiGate API response had unexpected JSON type: %s %s (%s)",
                 method,
                 url.path,

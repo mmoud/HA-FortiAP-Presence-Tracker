@@ -272,6 +272,32 @@ class TestFortiGatePolicyApi(unittest.TestCase):
         self.assertEqual("/api/v2/cmdb/system.dhcp/server", session.requests[3][1].path)
         self.assertEqual("/api/v2/cmdb/user/device", session.requests[4][1].path)
 
+    def test_wifi_catalog_optional_http_errors_do_not_warn(self) -> None:
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "status": "success",
+                        "results": [{"mac": "AA:BB:CC:DD:EE:FF"}],
+                    },
+                ),
+                FakeResponse(400, {}),
+                FakeResponse(400, {}),
+                FakeResponse(400, {}),
+                FakeResponse(400, {}),
+            ]
+        )
+
+        with self.assertNoLogs(
+            "custom_components.fortigate_policy.api", level="WARNING"
+        ):
+            clients, _skipped, _version = asyncio.run(
+                api(session).async_get_wifi_client_catalog()
+            )
+
+        self.assertIn("aa:bb:cc:dd:ee:ff", clients)
+
     def test_wifi_catalog_falls_back_across_fortios_endpoint_names(self) -> None:
         session = FakeSession(
             [

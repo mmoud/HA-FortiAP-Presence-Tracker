@@ -76,7 +76,7 @@ Open **Settings > Devices & services > FortiAP Presence Tracker** and select **C
 The page is organized into four wide views:
 
 - **Overview** shows connection health, configuration counts, safety behavior, and every person/device assignment.
-- **People & devices** shows actual tracker state, current SSID and FortiAP, friendly names, per-tracker SSID scopes, discovery results, and multi-device people.
+- **People & devices** puts people management first. Create, rename, assign, and remove people in place, then manage tracker state, SSID/FortiAP details, friendly names, SSID scopes, and client discovery on the same page. The discovery table scrolls independently so a large FortiGate catalog does not hide people controls.
 - **Policies & rules** manages optional verified firewall policy IDs and presence rules together.
 - **Settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
 

@@ -185,9 +185,17 @@ class FortiApPresencePanel extends HTMLElement {
       }
     }
     if (name === "add-person") {
-      this._draft.users.push({
+      const input = this.shadowRoot.querySelector("#new-person-name");
+      const personName = input?.value.trim();
+      if (!personName) {
+        this._error = "Enter a person name before adding the person.";
+        this._render();
+        return;
+      }
+      this._error = "";
+      this._draft.users.unshift({
         id: uid("person"),
-        name: "New person",
+        name: personName,
         macs: [],
         away_grace_period: 180,
       });
@@ -266,10 +274,10 @@ class FortiApPresencePanel extends HTMLElement {
       table{width:100%;border-collapse:collapse}th{text-align:left;color:var(--secondary-text-color);font-size:12px;text-transform:uppercase;letter-spacing:.04em;padding:0 10px 9px}td{border-top:1px solid var(--divider-color);padding:12px 10px;vertical-align:middle}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.stack{display:grid;gap:12px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.grow{flex:1}.right{text-align:right}
       input,select{width:100%;min-height:42px;border:1px solid var(--divider-color);border-radius:9px;padding:9px 11px;background:var(--card-background-color);color:var(--primary-text-color);font:inherit}input[type=checkbox]{width:18px;min-height:18px;accent-color:var(--primary-color)}label{display:grid;gap:6px;font-size:13px;font-weight:650;color:var(--secondary-text-color)}.toggle{display:flex;align-items:center;gap:10px;color:var(--primary-text-color);font-weight:500}
       button{font:inherit}.btn{border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--primary-text-color);border-radius:9px;padding:9px 13px;font-weight:650;cursor:pointer}.btn.primary{background:var(--primary-color);border-color:var(--primary-color);color:var(--text-primary-color,#fff)}.btn.danger{color:var(--error-color)}.btn:disabled{opacity:.55;cursor:wait}.icon-btn{border:0;background:transparent;color:var(--error-color);cursor:pointer;padding:8px}
-      .person,.rule{border:1px solid var(--divider-color);border-radius:12px;padding:16px}.checks{display:flex;gap:10px 18px;flex-wrap:wrap}.checks label{display:flex;align-items:center;gap:7px;color:var(--primary-text-color);font-weight:500}.form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.notice{border-radius:10px;padding:11px 14px;margin-bottom:16px;background:var(--primary-color);color:var(--text-primary-color,#fff)}.notice.error{background:var(--error-color)}
+      .person,.rule{border:1px solid var(--divider-color);border-radius:12px;padding:16px}.checks{display:flex;gap:10px 18px;flex-wrap:wrap}.checks label{display:flex;align-items:center;gap:7px;color:var(--primary-text-color);font-weight:500}.form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.add-row{flex-wrap:nowrap}.add-row input{width:260px}.table-scroll{max-height:520px;overflow:auto;border-radius:9px}.table-scroll thead{position:sticky;top:0;background:var(--card-background-color);z-index:1}.notice{border-radius:10px;padding:11px 14px;margin-bottom:16px;background:var(--primary-color);color:var(--text-primary-color,#fff)}.notice.error{background:var(--error-color)}
       .savebar{position:fixed;z-index:5;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--card-background-color) 94%,transparent);backdrop-filter:blur(12px);border-top:1px solid var(--divider-color);padding:14px 28px}.save-inner{max-width:1444px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:16px}.empty{text-align:center;padding:42px;color:var(--secondary-text-color)}
       @media(max-width:900px){.shell{padding:18px 14px 110px}.span-3,.span-4,.span-6{grid-column:span 12}.form-grid{grid-template-columns:1fr 1fr}.top{display:block}.top .row{margin-top:14px}table{display:block;overflow:auto}.savebar{padding:12px 14px}}
-      @media(max-width:560px){.form-grid{grid-template-columns:1fr}h1{font-size:26px}}
+      @media(max-width:560px){.form-grid{grid-template-columns:1fr}h1{font-size:26px}.add-row{width:100%;flex-wrap:wrap}.add-row input{width:100%}}
     </style>`;
   }
 
@@ -301,11 +309,11 @@ class FortiApPresencePanel extends HTMLElement {
   _devices() {
     const trackers = this._draft.trackers;
     return `<div class="grid">
+      <section class="card"><div class="section-head"><div><h2>People</h2><div class="muted">Create a person, then assign one or more tracked devices. Any assigned device at home makes the person home.</div></div><div class="row add-row"><input id="new-person-name" placeholder="Person name" aria-label="New person name"><button class="btn primary" data-action="add-person">Add person</button></div></div><div class="stack">${this._draft.users.map((user, index) => this._personEditor(user, index)).join("") || `<div class="empty">No people configured. Enter a name above to create the first person.</div>`}</div></section>
       <section class="card"><div class="section-head"><div><h2>Tracked wireless devices</h2><div class="muted">Actual association state, friendly name, and optional SSID scope in one table</div></div><button class="btn" data-action="discover">Discover now</button></div>
         ${trackers.length ? `<table><thead><tr><th>State</th><th>Device</th><th>Current connection</th><th>Allowed SSIDs</th><th></th></tr></thead><tbody>${trackers.map((item, index) => `<tr><td><span class="status ${escapeHtml(item.state)}">${escapeHtml(item.state)}</span></td><td><input data-model="trackers.${index}.name" value="${escapeHtml(item.name)}"><div class="mono muted">${escapeHtml(item.mac)}</div></td><td><strong>${escapeHtml(item.client?.ssid || "—")}</strong><div class="muted">${escapeHtml(item.client?.ap_name || "No current FortiAP")}</div></td><td><input data-model="trackers.${index}.allowed_ssids" data-kind="csv" value="${escapeHtml((item.allowed_ssids || []).join(", "))}" placeholder="Any managed SSID"></td><td class="right"><button class="icon-btn" data-action="remove-tracker" data-mac="${escapeHtml(item.mac)}" title="Remove tracker">Remove</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">No selected trackers. Discover clients below.</div>`}
       </section>
-      <section class="card"><div class="section-head"><div><h2>Discovered clients</h2><div class="muted">Only devices you add become entities</div></div></div>${this._discoveredTable()}</section>
-      <section class="card"><div class="section-head"><div><h2>People</h2><div class="muted">A person is home when any assigned device is home</div></div><button class="btn" data-action="add-person">Add person</button></div><div class="stack">${this._draft.users.map((user, index) => this._personEditor(user, index)).join("") || `<div class="empty">No people configured.</div>`}</div></section>
+      <section class="card"><div class="section-head"><div><h2>Discovered clients</h2><div class="muted">${escapeHtml(this._discovered.length)} available clients. Only devices you add become entities.</div></div></div><div class="table-scroll">${this._discoveredTable()}</div></section>
     </div>`;
   }
 

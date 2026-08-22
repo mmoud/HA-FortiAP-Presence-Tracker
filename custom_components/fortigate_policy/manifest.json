@@ -1,6 +1,6 @@
 {
   "domain": "fortigate_policy",
-  "name": "FortiGate",
+  "name": "FortiAP Presence Tracker",
   "codeowners": [],
   "config_flow": true,
   "dependencies": [],
@@ -9,5 +9,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/mmoud/ha-fortigate/issues",
   "requirements": [],
-  "version": "1.7.1"
+  "version": "1.7.2"
 }

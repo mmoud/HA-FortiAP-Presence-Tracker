@@ -1,4 +1,4 @@
-# FortiGate for Home Assistant
+# FortiAP Presence Tracker for Home Assistant
 
 Home Assistant integration for controlling FortiGate firewall policies and tracking selected FortiAP Wi-Fi clients.
 
@@ -21,9 +21,9 @@ It provides:
 
 1. In HACS, open **Integrations > Custom repositories**.
 2. Add `https://github.com/mmoud/ha-fortigate` as an **Integration**.
-3. Download **FortiGate** and restart Home Assistant.
+3. Download **FortiAP Presence Tracker** and restart Home Assistant.
 4. Open **Settings > Devices & services > Add integration**.
-5. Search for **FortiGate** and complete the form.
+5. Search for **FortiAP Presence Tracker** and complete the form.
 
 No YAML configuration is required.
 

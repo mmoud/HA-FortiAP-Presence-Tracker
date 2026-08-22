@@ -72,7 +72,10 @@ Open **Settings > Devices & services > FortiGate**, find the configured entry, a
 
 - **Firewall policies** adds or removes optional firewall-policy switches.
 - **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
+- **Remove Wi-Fi trackers** deletes selected tracker entities, presence sensors, and their Home Assistant device entries without changing anything on FortiGate.
 - **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
+
+Disabling Wi-Fi tracking is reversible and retains the selected devices. Use **Remove Wi-Fi trackers** when the entities should be deleted from Home Assistant.
 
 Use **Firewall policies** in the same Configure menu to add or remove policy switches with a comma-separated list of policy IDs. The integration verifies every policy before saving the change.
 

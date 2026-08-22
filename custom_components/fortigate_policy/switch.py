@@ -20,6 +20,7 @@ from .const import (
     STATUS_ENABLE,
 )
 from .coordinator import FortiGatePolicyCoordinator
+from .policy_config import fortigate_entry_title
 
 
 async def async_setup_entry(
@@ -65,7 +66,7 @@ class FortiGatePolicySwitch(
         self._attr_suggested_object_id = f"fortigate_policy_{policy_id}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
+            "name": fortigate_entry_title(entry.data),
             "manufacturer": "Fortinet",
             "model": "FortiGate",
         }

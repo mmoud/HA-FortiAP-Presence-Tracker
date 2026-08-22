@@ -11,6 +11,7 @@ from .const import (
     CONF_POLICIES,
     CONF_POLICY_ID,
     CONF_POLICY_NAME,
+    CONF_VDOM,
 )
 
 
@@ -20,6 +21,16 @@ class PolicyDefinition:
 
     policy_id: str
     expected_name: str
+
+
+def fortigate_entry_title(data: Mapping[str, Any]) -> str:
+    """Return a stable appliance title that is independent of policy names."""
+    host = str(data.get("host", "")).strip()
+    vdom = str(data.get(CONF_VDOM, "")).strip()
+    title = f"FortiGate {host}" if host else "FortiGate"
+    if vdom and vdom != "root":
+        return f"{title} ({vdom})"
+    return title
 
 
 def parse_policy_ids(value: object) -> tuple[str, ...]:

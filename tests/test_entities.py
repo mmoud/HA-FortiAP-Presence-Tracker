@@ -180,7 +180,7 @@ class TestMultiPolicyValidation(unittest.TestCase):
                 _async_validate_input(SimpleNamespace(), normalized)  # type: ignore[arg-type]
             )
 
-        self.assertEqual("FortiGate (2 policies)", title)
+        self.assertEqual("FortiGate fortigate.example.test", title)
         self.assertEqual(("61", "72"), tuple(p.policy_id for p in policies))
         self.assertEqual(
             ("Family access", "Guest access"),

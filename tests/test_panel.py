@@ -154,6 +154,12 @@ class TestPanelSnapshot(unittest.TestCase):
 class TestPanelFrontend(unittest.TestCase):
     """Keep essential full-page management controls prominent."""
 
+    def test_header_has_home_assistant_exit(self) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        self.assertIn('href="/home"', source)
+        self.assertIn("Back to Home Assistant overview", source)
+
     def test_people_creation_precedes_large_discovery_catalog(self) -> None:
         source = FRONTEND.read_text(encoding="utf-8")
 

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from custom_components.fortigate_policy.const import STATUS_DISABLE, STATUS_ENABLE
 from custom_components.fortigate_policy.policy_rules import (
+    PolicyRule,
     PresencePolicyRuleManager,
+    migrate_user_intents_to_policy_rules,
     resolve_policy_intents,
 )
 from custom_components.fortigate_policy.presence_users import (
@@ -127,6 +129,25 @@ class TestPresenceUserModel(unittest.TestCase):
         self.assertEqual([MAC_1], profile["presence_user_macs"])
         self.assertEqual(["61"], profile["away_disable_policies"])
 
+    def test_user_attached_intents_migrate_to_policy_rules(self) -> None:
+        migrated = migrate_user_intents_to_policy_rules(
+            {
+                "user-1": {
+                    "presence_user_name": "Example user",
+                    "home_enable_policies": ["61"],
+                    "away_disable_policies": ["61", "999"],
+                }
+            },
+            {"61"},
+        )
+        self.assertEqual(2, len(migrated))
+        self.assertEqual(
+            ["61"], migrated["migrated_user-1_home_enable"]["policy_rule_policies"]
+        )
+        self.assertEqual(
+            "away", migrated["migrated_user-1_away_disable"]["policy_rule_presence"]
+        )
+
 
 class TestPolicyResolution(unittest.TestCase):
     def test_users_control_independent_policy_sets(self) -> None:
@@ -164,6 +185,145 @@ class TestPolicyResolution(unittest.TestCase):
         )
         self.assertEqual({}, result.desired)
         self.assertEqual(frozenset({"1"}), result.blocked_unknown)
+
+    def test_policy_rule_any_user_home_matches(self) -> None:
+        users = {
+            "one": _user("one", frozenset({MAC_1})),
+            "two": _user("two", frozenset({MAC_2})),
+        }
+        rule = PolicyRule(
+            "rule-1",
+            "Family arrived",
+            frozenset(users),
+            "any",
+            "home",
+            STATUS_ENABLE,
+            frozenset({"1"}),
+            50,
+        )
+        result = resolve_policy_intents(
+            (),
+            {MAC_1: _presence(False), MAC_2: _presence(True)},
+            policy_rules=(rule,),
+            users=users,
+        )
+        self.assertEqual({"1": STATUS_ENABLE}, result.desired)
+        self.assertIn("Family arrived", result.reasons["1"])
+
+    def test_policy_rule_all_users_away_waits_for_unknown(self) -> None:
+        users = {
+            "one": _user("one", frozenset({MAC_1})),
+            "two": _user("two", frozenset({MAC_2})),
+        }
+        rule = PolicyRule(
+            "rule-1",
+            "Everyone left",
+            frozenset(users),
+            "all",
+            "away",
+            STATUS_DISABLE,
+            frozenset({"1"}),
+            50,
+        )
+        result = resolve_policy_intents(
+            (),
+            {MAC_1: _presence(False), MAC_2: _presence(None)},
+            policy_rules=(rule,),
+            users=users,
+        )
+        self.assertEqual({}, result.desired)
+        self.assertEqual(frozenset({"1"}), result.blocked_unknown)
+
+    def test_higher_priority_wins_and_equal_priority_disable_wins(self) -> None:
+        user = _user("one", frozenset({MAC_1}))
+        rules = (
+            PolicyRule(
+                "low",
+                "Low priority",
+                frozenset({"one"}),
+                "any",
+                "home",
+                STATUS_DISABLE,
+                frozenset({"1"}),
+                10,
+            ),
+            PolicyRule(
+                "high-enable",
+                "High enable",
+                frozenset({"one"}),
+                "any",
+                "home",
+                STATUS_ENABLE,
+                frozenset({"1"}),
+                80,
+            ),
+            PolicyRule(
+                "high-disable",
+                "High disable",
+                frozenset({"one"}),
+                "any",
+                "home",
+                STATUS_DISABLE,
+                frozenset({"1"}),
+                80,
+            ),
+        )
+        result = resolve_policy_intents(
+            (),
+            {MAC_1: _presence(True)},
+            policy_rules=rules,
+            users={"one": user},
+        )
+        self.assertEqual({"1": STATUS_DISABLE}, result.desired)
+        self.assertEqual(frozenset({"1"}), result.conflicts)
+
+    def test_inactive_schedule_skips_rule_and_unknown_schedule_blocks(self) -> None:
+        user = _user("one", frozenset({MAC_1}))
+        rule = PolicyRule(
+            "scheduled",
+            "School hours",
+            frozenset({"one"}),
+            "any",
+            "home",
+            STATUS_DISABLE,
+            frozenset({"1"}),
+            50,
+            "schedule.school_hours",
+        )
+        inactive = resolve_policy_intents(
+            (),
+            {MAC_1: _presence(True)},
+            policy_rules=(rule,),
+            users={"one": user},
+            schedule_states={"schedule.school_hours": False},
+        )
+        unknown = resolve_policy_intents(
+            (),
+            {MAC_1: _presence(True)},
+            policy_rules=(rule,),
+            users={"one": user},
+            schedule_states={"schedule.school_hours": None},
+        )
+        self.assertEqual({}, inactive.desired)
+        self.assertEqual(frozenset(), inactive.blocked_unknown)
+        self.assertEqual(frozenset({"1"}), unknown.blocked_unknown)
+
+    def test_user_grace_can_extend_device_grace(self) -> None:
+        user = PresenceUser(
+            "one",
+            "User 1",
+            frozenset({MAC_1}),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            300,
+        )
+        missing = WifiPresence(False, NOW - timedelta(seconds=200), NOW, None)
+        self.assertTrue(aggregate_presence(user, {MAC_1: missing}, NOW))
+        self.assertFalse(
+            aggregate_presence(user, {MAC_1: missing}, NOW + timedelta(seconds=101))
+        )
 
 
 class TestPresencePolicyRuleManager(unittest.TestCase):
@@ -223,3 +383,57 @@ class TestPresencePolicyRuleManager(unittest.TestCase):
 
         self.assertEqual([], policy.commands)
         self.assertEqual(frozenset({"1"}), manager.last_result.blocked_unknown)
+
+    def test_dry_run_calculates_but_does_not_write(self) -> None:
+        policy = FakePolicyCoordinator(STATUS_ENABLE)
+        wifi = SimpleNamespace(
+            last_update_success=True,
+            data=SimpleNamespace(presence={MAC_1: _presence(False)}),
+        )
+        manager = PresencePolicyRuleManager(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            wifi,  # type: ignore[arg-type]
+            {"1": policy},  # type: ignore[arg-type]
+            (_user(macs=frozenset({MAC_1}), away_disable=frozenset({"1"})),),
+            dry_run=True,
+        )
+
+        asyncio.run(manager.async_reconcile())
+
+        self.assertEqual({"1": STATUS_DISABLE}, manager.last_result.desired)
+        self.assertEqual([], policy.commands)
+
+    def test_manual_override_works_during_wifi_outage(self) -> None:
+        policy = FakePolicyCoordinator(STATUS_ENABLE)
+        wifi = SimpleNamespace(last_update_success=False, data=None)
+        bus = SimpleNamespace(events=[])
+        bus.async_fire = lambda event, data: bus.events.append((event, data))
+        manager = PresencePolicyRuleManager(
+            SimpleNamespace(bus=bus),  # type: ignore[arg-type]
+            wifi,  # type: ignore[arg-type]
+            {"1": policy},  # type: ignore[arg-type]
+            (),
+        )
+
+        asyncio.run(manager.async_set_override("1", "force_disable", minutes=0))
+
+        self.assertEqual([STATUS_DISABLE], policy.commands)
+        self.assertEqual("force_disable", manager.override_for("1").mode)
+        self.assertEqual("fortigate_policy_decision", bus.events[0][0])
+
+    def test_paused_override_prevents_rule_write(self) -> None:
+        policy = FakePolicyCoordinator(STATUS_ENABLE)
+        wifi = SimpleNamespace(
+            last_update_success=True,
+            data=SimpleNamespace(presence={MAC_1: _presence(False)}),
+        )
+        manager = PresencePolicyRuleManager(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            wifi,  # type: ignore[arg-type]
+            {"1": policy},  # type: ignore[arg-type]
+            (_user(macs=frozenset({MAC_1}), away_disable=frozenset({"1"})),),
+        )
+
+        asyncio.run(manager.async_set_override("1", "paused", minutes=0))
+
+        self.assertEqual([], policy.commands)

@@ -18,6 +18,7 @@ from .const import CONF_FRIENDLY_NAME, CONF_TRACKED_CLIENTS, CONF_VDOM, DOMAIN
 from .coordinator import FortiGateWifiCoordinator
 from .policy_config import configured_policies
 from .presence_users import PresenceUser, aggregate_presence, configured_presence_users
+from .wifi import utcnow
 
 
 async def async_setup_entry(
@@ -190,7 +191,7 @@ class FortiGatePresenceUserTracker(
         """Aggregate only already grace-aware member states."""
         if self.coordinator.data is None:
             return None
-        return aggregate_presence(self._user, self.coordinator.data.presence)
+        return aggregate_presence(self._user, self.coordinator.data.presence, utcnow())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

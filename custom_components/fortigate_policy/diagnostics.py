@@ -10,6 +10,9 @@ from homeassistant.core import HomeAssistant
 from . import FortiGatePolicyConfigEntry
 from .const import (
     CONF_API_TOKEN,
+    CONF_DEFAULT_OVERRIDE_MINUTES,
+    CONF_POLICY_AUTOMATION_DRY_RUN,
+    CONF_POLICY_AUTOMATION_ENABLED,
     CONF_TRACKED_CLIENTS,
     CONF_WIFI_AWAY_GRACE_PERIOD,
     CONF_WIFI_POLL_INTERVAL,
@@ -83,7 +86,19 @@ async def async_get_config_entry_diagnostics(
                 "configured_user_count": len(presence_users),
                 "assigned_device_count": sum(len(user.macs) for user in presence_users),
                 "configured_rule_count": (
-                    len(rule_manager.rules) if rule_manager else 0
+                    len(rule_manager.rules) + len(rule_manager.policy_rules)
+                    if rule_manager
+                    else 0
+                ),
+                "automation_enabled": entry.options.get(
+                    CONF_POLICY_AUTOMATION_ENABLED, True
+                ),
+                "dry_run": entry.options.get(CONF_POLICY_AUTOMATION_DRY_RUN, False),
+                "default_override_minutes": entry.options.get(
+                    CONF_DEFAULT_OVERRIDE_MINUTES, 60
+                ),
+                "active_override_count": (
+                    len(rule_manager.overrides) if rule_manager else 0
                 ),
                 "last_reconcile": (
                     rule_manager.last_reconcile.isoformat()

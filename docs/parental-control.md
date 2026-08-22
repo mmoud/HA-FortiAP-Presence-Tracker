@@ -135,3 +135,17 @@ For a longer override, disable the relevant Home Assistant automation rather tha
 Wi-Fi association is a useful automation signal, not an identity or security boundary. A device may avoid the controlled path by using cellular data, another SSID, another device, or a changed private MAC address. On Apple devices, use the Fixed Private Wi-Fi Address option for the tracked SSID when available.
 
 FortiOS permission profiles commonly grant access to a configuration area rather than one policy ID. Restrict the REST administrator by trusted host, use least privilege, and keep the FortiGate management interface private.
+## Recommended rule workflow
+
+1. Add selected Wi-Fi devices as trackers.
+2. Combine each person's phone, watch, and tablet under **Presence users**.
+3. Open **Policy automation rules** and create the condition for each policy.
+4. Review the generated summary before confirming it.
+5. Start with **Dry run** enabled and inspect the policy decision sensors.
+6. Disable dry run when the decisions match the intended behavior.
+
+Use **Any user** when one matching person is enough to apply a rule. Use **All users** for conditions such as “disable when every child is away.” Higher priority rules override lower priority rules. Disable wins only when opposite actions tie at the winning priority.
+
+Select an optional Home Assistant Schedule helper to restrict a rule to school hours, bedtime, or another weekly time window. An unavailable schedule blocks the rule instead of being treated as OFF.
+
+The policy override select provides Automatic, Force enabled, Force disabled, and Paused modes. Overrides expire using the configured default duration and always return to Automatic after a Home Assistant restart.

@@ -45,6 +45,7 @@
       "no_trackers": "There are no configured Wi-Fi trackers to remove.",
       "no_policies": "There are no configured firewall policies.",
       "no_presence_users": "There are no configured presence users.",
+      "no_policy_rules": "There are no configured policy rules.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -58,6 +59,11 @@
       "select_tracker_to_remove": "Select at least one tracker to remove.",
       "select_user_device": "Assign at least one tracked device to this user.",
       "select_presence_user_to_remove": "Select at least one user to remove.",
+      "device_already_assigned": "One or more selected devices already belong to another user.",
+      "select_rule_user": "Select at least one user for this rule.",
+      "select_rule_policy": "Select at least one policy for this rule.",
+      "select_policy_rule_to_remove": "Select at least one rule to remove.",
+      "confirmation_required": "Review the rule and select the confirmation checkbox before saving.",
       "required": "This field is required."
     },
     "step": {
@@ -67,7 +73,8 @@
         "menu_options": {
           "firewall_policies": "Firewall policies",
           "wifi_clients": "Add or manage Wi-Fi trackers",
-          "presence_users": "Users and policy rules",
+          "presence_users": "Presence users",
+          "policy_rules": "Policy automation rules",
           "remove_wifi_trackers": "Remove Wi-Fi trackers",
           "wifi_settings": "Polling and sensors"
         }
@@ -83,13 +90,64 @@
         }
       },
       "presence_users": {
-        "title": "Users and policy rules",
-        "description": "Combine a user's phone, watch, or other Wi-Fi devices into one presence state.",
+        "title": "Presence users",
+        "description": "Combine a user's phone, watch, or other Wi-Fi devices into one presence state. Configure firewall behavior separately under Policy automation rules.",
         "menu_options": {
           "add_presence_user": "Add user",
           "edit_presence_user": "Edit user",
           "remove_presence_users": "Remove users"
         }
+      },
+      "policy_rules": {
+        "title": "Policy automation rules",
+        "description": "Build prioritized rules from one or more presence users, with optional Home Assistant schedules.",
+        "menu_options": {
+          "add_policy_rule": "Add rule",
+          "edit_policy_rule": "Edit rule",
+          "remove_policy_rules": "Remove rules"
+        }
+      },
+      "edit_policy_rule": {
+        "title": "Edit policy rule",
+        "data": {"policy_rule_id": "Rule"}
+      },
+      "add_policy_rule": {
+        "title": "Add policy rule",
+        "description": "Choose the users, presence condition, resulting policy state, and priority.",
+        "data": {
+          "policy_rule_name": "Rule name",
+          "policy_rule_users": "Users",
+          "policy_rule_match": "User matching",
+          "policy_rule_presence": "Required presence",
+          "policy_rule_action": "Policy action",
+          "policy_rule_policies": "Policies",
+          "policy_rule_priority": "Priority",
+          "policy_rule_schedule": "Schedule (optional)"
+        }
+      },
+      "edit_policy_rule_details": {
+        "title": "Edit policy rule",
+        "description": "Changing a rule requires a preview before it is applied.",
+        "data": {
+          "policy_rule_name": "Rule name",
+          "policy_rule_users": "Users",
+          "policy_rule_match": "User matching",
+          "policy_rule_presence": "Required presence",
+          "policy_rule_action": "Policy action",
+          "policy_rule_policies": "Policies",
+          "policy_rule_priority": "Priority",
+          "policy_rule_schedule": "Schedule (optional)"
+        }
+      },
+      "policy_rule_preview": {
+        "title": "Confirm policy rule",
+        "description": "{name}: when {match} of {users} are {presence}, {action} policies {policies}. Priority: {priority}. Schedule: {schedule}. Current user states: {current_states}. Conflict check: {conflict}. Unknown required state blocks the write; equal-priority disable wins conflicts.",
+        "data": {"confirm": "I have reviewed this rule"}
+      },
+      "remove_policy_rules": {
+        "title": "Remove policy rules",
+        "description": "Removing a rule stops future enforcement by that rule. It does not immediately change FortiGate.",
+        "data": {"policy_rules_to_remove": "Rules to remove"}
       },
       "edit_presence_user": {
         "title": "Edit presence user",
@@ -100,14 +158,11 @@
       },
       "add_presence_user": {
         "title": "Add presence user",
-        "description": "The user is home when any assigned device is home, and away only when every assigned device is away. Policy fields are optional.",
+        "description": "The user is home when any assigned device is home, and away only when every assigned device is away for the configured grace period.",
         "data": {
           "presence_user_name": "User name",
           "presence_user_macs": "Devices",
-          "home_enable_policies": "Enable while home",
-          "home_disable_policies": "Disable while home",
-          "away_enable_policies": "Enable while away",
-          "away_disable_policies": "Disable while away"
+          "user_away_grace_period": "User away grace period (seconds)"
         }
       },
       "edit_presence_user_profile": {
@@ -116,10 +171,7 @@
         "data": {
           "presence_user_name": "User name",
           "presence_user_macs": "Devices",
-          "home_enable_policies": "Enable while home",
-          "home_disable_policies": "Disable while home",
-          "away_enable_policies": "Enable while away",
-          "away_disable_policies": "Disable while away"
+          "user_away_grace_period": "User away grace period (seconds)"
         }
       },
       "remove_presence_users": {
@@ -136,6 +188,10 @@
           "wifi_poll_interval": "Wi-Fi client polling interval (seconds)",
           "wifi_away_grace_period": "Away grace period (seconds)",
           "wifi_client_count_sensor": "Create Wi-Fi client count sensor"
+          ,"policy_automation_enabled": "Enable automatic policy enforcement"
+          ,"policy_automation_dry_run": "Dry run (calculate but do not write)"
+          ,"default_override_minutes": "Default manual override duration (minutes; 0 never expires)"
+          ,"recent_client_retention_days": "Recently seen device retention (days)"
         }
       },
       "wifi_clients": {
@@ -176,6 +232,49 @@
     "binary_sensor": {
       "presence": {
         "name": "Presence"
+      }
+    },
+    "select": {
+      "policy_override": {
+        "name": "Policy automation override",
+        "state": {
+          "automatic": "Automatic",
+          "force_enable": "Force enabled",
+          "force_disable": "Force disabled",
+          "paused": "Paused"
+        }
+      }
+    },
+    "sensor": {
+      "policy_decision": {"name": "Policy automation decision"}
+    }
+  },
+  "selector": {
+    "policy_rule_match": {
+      "options": {"any": "Any user", "all": "All users"}
+    },
+    "policy_rule_presence": {
+      "options": {"home": "Home", "away": "Away"}
+    },
+    "policy_rule_action": {
+      "options": {"enable": "Enable", "disable": "Disable"}
+    }
+  },
+  "issues": {
+    "policy_automation_failed": {
+      "title": "FortiGate policy automation is failing",
+      "description": "FortiAP Presence Tracker could not verify repeated policy automation updates. Check FortiGate reachability, API permissions, policy identity, and integration diagnostics. Automation will retry after new coordinator updates."
+    }
+  },
+  "services": {
+    "set_policy_override": {
+      "name": "Set policy automation override",
+      "description": "Force, pause, or restore automatic control for one rule-managed policy.",
+      "fields": {
+        "config_entry_id": {"name": "Config entry ID", "description": "The FortiAP Presence Tracker config entry ID."},
+        "policy_id": {"name": "Policy ID", "description": "A policy configured on this integration entry."},
+        "mode": {"name": "Mode", "description": "Automatic, forced enabled, forced disabled, or paused."},
+        "duration_minutes": {"name": "Duration", "description": "Minutes before returning to Automatic. Zero lasts until changed or Home Assistant restarts."}
       }
     }
   }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from .const import (
@@ -16,6 +17,10 @@ from .const import (
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
+    CONF_USER_AWAY_GRACE_PERIOD,
+    DEFAULT_USER_AWAY_GRACE_PERIOD,
+    MAX_USER_AWAY_GRACE_PERIOD,
+    MIN_USER_AWAY_GRACE_PERIOD,
 )
 from .wifi import WifiPresence, normalize_mac
 
@@ -38,6 +43,7 @@ class PresenceUser:
     home_disable: frozenset[str]
     away_enable: frozenset[str]
     away_disable: frozenset[str]
+    away_grace_period: int = DEFAULT_USER_AWAY_GRACE_PERIOD
 
     @property
     def affected_policies(self) -> frozenset[str]:
@@ -57,16 +63,27 @@ class PresenceUser:
 
 
 def aggregate_presence(
-    user: PresenceUser, presence: Mapping[str, WifiPresence]
+    user: PresenceUser,
+    presence: Mapping[str, WifiPresence],
+    now: datetime | None = None,
 ) -> bool | None:
-    """Return home if any device is home, away if all are away, else unknown."""
-    states = [
-        presence.get(mac).is_connected if presence.get(mac) is not None else None
-        for mac in user.macs
-    ]
+    """Return conservative aggregate state with an optional longer user grace."""
+    members = [presence.get(mac) for mac in user.macs]
+    states = [member.is_connected if member is not None else None for member in members]
     if any(state is True for state in states):
         return True
+    if any(state is None for state in states):
+        return None
     if states and all(state is False for state in states):
+        if now is not None:
+            for member in members:
+                if (
+                    member is not None
+                    and member.missing_since is not None
+                    and (now - member.missing_since).total_seconds()
+                    < user.away_grace_period
+                ):
+                    return True
         return False
     return None
 
@@ -77,6 +94,14 @@ def _policy_set(value: object, valid_policy_ids: set[str]) -> frozenset[str]:
     return frozenset(
         str(policy_id) for policy_id in value if str(policy_id) in valid_policy_ids
     )
+
+
+def _away_grace(value: object) -> int:
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        seconds = DEFAULT_USER_AWAY_GRACE_PERIOD
+    return max(MIN_USER_AWAY_GRACE_PERIOD, min(MAX_USER_AWAY_GRACE_PERIOD, seconds))
 
 
 def configured_presence_users(
@@ -125,6 +150,12 @@ def configured_presence_users(
                 away_disable=_policy_set(
                     raw_user.get(CONF_AWAY_DISABLE_POLICIES), valid_policy_ids
                 ),
+                away_grace_period=_away_grace(
+                    raw_user.get(
+                        CONF_USER_AWAY_GRACE_PERIOD,
+                        DEFAULT_USER_AWAY_GRACE_PERIOD,
+                    )
+                ),
             )
         )
     return tuple(users)
@@ -147,6 +178,7 @@ def serialize_presence_users(
             CONF_HOME_DISABLE_POLICIES: sorted(user.home_disable),
             CONF_AWAY_ENABLE_POLICIES: sorted(user.away_enable),
             CONF_AWAY_DISABLE_POLICIES: sorted(user.away_disable),
+            CONF_USER_AWAY_GRACE_PERIOD: user.away_grace_period,
         }
         for user in parsed
     }

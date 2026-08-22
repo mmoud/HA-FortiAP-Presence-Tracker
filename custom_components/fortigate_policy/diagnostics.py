@@ -16,6 +16,8 @@ from .const import (
     CONF_WIFI_TRACKING_ENABLED,
 )
 from .policy_config import configured_policies
+from .presence_users import configured_presence_users
+from .wifi import normalize_mac
 
 TO_REDACT = {CONF_API_TOKEN}
 
@@ -28,6 +30,16 @@ async def async_get_config_entry_diagnostics(
     wifi = runtime.wifi_coordinator
     rule_manager = runtime.rule_manager
     tracked = entry.options.get(CONF_TRACKED_CLIENTS, {})
+    tracked_macs = {
+        normalized
+        for mac in tracked
+        if isinstance(tracked, dict) and (normalized := normalize_mac(mac)) is not None
+    }
+    presence_users = configured_presence_users(
+        entry.options,
+        tracked_macs,
+        {policy.policy_id for policy in configured_policies(entry.data)},
+    )
     return async_redact_data(
         {
             "config_entry": dict(entry.data),
@@ -68,6 +80,8 @@ async def async_get_config_entry_diagnostics(
                 ),
             },
             "presence_policy_rules": {
+                "configured_user_count": len(presence_users),
+                "assigned_device_count": sum(len(user.macs) for user in presence_users),
                 "configured_rule_count": (
                     len(rule_manager.rules) if rule_manager else 0
                 ),

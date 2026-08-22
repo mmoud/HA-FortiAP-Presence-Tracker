@@ -11,52 +11,21 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
-    CONF_AWAY_DISABLE_POLICIES,
-    CONF_AWAY_ENABLE_POLICIES,
-    CONF_HOME_DISABLE_POLICIES,
-    CONF_HOME_ENABLE_POLICIES,
-    CONF_PRESENCE_POLICY_RULES,
     STATUS_DISABLE,
     STATUS_ENABLE,
 )
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
-from .wifi import WifiPresence, normalize_mac
+from .presence_users import (
+    PresenceUser,
+    aggregate_presence,
+    configured_presence_users,
+    migrate_tracker_rules_to_users,
+)
+from .wifi import WifiPresence
 
 _LOGGER = logging.getLogger(__name__)
 
-RULE_FIELDS = (
-    CONF_HOME_ENABLE_POLICIES,
-    CONF_HOME_DISABLE_POLICIES,
-    CONF_AWAY_ENABLE_POLICIES,
-    CONF_AWAY_DISABLE_POLICIES,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class PresencePolicyRule:
-    """Policy states requested by one tracked MAC for each presence state."""
-
-    mac: str
-    home_enable: frozenset[str]
-    home_disable: frozenset[str]
-    away_enable: frozenset[str]
-    away_disable: frozenset[str]
-
-    @property
-    def affected_policies(self) -> frozenset[str]:
-        """Return every policy whose state may depend on this tracker."""
-        return frozenset().union(
-            self.home_enable,
-            self.home_disable,
-            self.away_enable,
-            self.away_disable,
-        )
-
-    def intents_for(self, is_home: bool) -> tuple[frozenset[str], frozenset[str]]:
-        """Return the enable and disable intents for a known presence state."""
-        if is_home:
-            return self.home_enable, self.home_disable
-        return self.away_enable, self.away_disable
+PresencePolicyRule = PresenceUser
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,66 +37,23 @@ class ResolvedPolicyIntents:
     conflicts: frozenset[str]
 
 
-def _policy_set(value: object, valid_policy_ids: set[str]) -> frozenset[str]:
-    if not isinstance(value, list):
-        return frozenset()
-    return frozenset(
-        str(policy_id) for policy_id in value if str(policy_id) in valid_policy_ids
-    )
-
-
 def configured_presence_rules(
     options: Mapping[str, Any],
     tracked_macs: set[str],
     valid_policy_ids: set[str],
 ) -> tuple[PresencePolicyRule, ...]:
-    """Parse persisted rules while ignoring stale trackers and policy IDs."""
-    raw_rules = options.get(CONF_PRESENCE_POLICY_RULES, {})
-    if not isinstance(raw_rules, Mapping):
-        return ()
-    rules: list[PresencePolicyRule] = []
-    for raw_mac, raw_rule in raw_rules.items():
-        mac = normalize_mac(raw_mac)
-        if mac is None or mac not in tracked_macs or not isinstance(raw_rule, Mapping):
-            continue
-        rule = PresencePolicyRule(
-            mac=mac,
-            home_enable=_policy_set(
-                raw_rule.get(CONF_HOME_ENABLE_POLICIES), valid_policy_ids
-            ),
-            home_disable=_policy_set(
-                raw_rule.get(CONF_HOME_DISABLE_POLICIES), valid_policy_ids
-            ),
-            away_enable=_policy_set(
-                raw_rule.get(CONF_AWAY_ENABLE_POLICIES), valid_policy_ids
-            ),
-            away_disable=_policy_set(
-                raw_rule.get(CONF_AWAY_DISABLE_POLICIES), valid_policy_ids
-            ),
+    """Parse user rules, with a runtime fallback for pre-migration entries."""
+    users = configured_presence_users(options, tracked_macs, valid_policy_ids)
+    if users:
+        return tuple(user for user in users if user.affected_policies)
+    legacy = migrate_tracker_rules_to_users(options, tracked_macs)
+    return tuple(
+        user
+        for user in configured_presence_users(
+            {"presence_users": legacy}, tracked_macs, valid_policy_ids
         )
-        if rule.affected_policies:
-            rules.append(rule)
-    return tuple(rules)
-
-
-def serialize_presence_rules(
-    rules: Mapping[str, object],
-    tracked_macs: set[str],
-    valid_policy_ids: set[str],
-) -> dict[str, dict[str, list[str]]]:
-    """Normalize and prune rule options after trackers or policies change."""
-    parsed = configured_presence_rules(
-        {CONF_PRESENCE_POLICY_RULES: rules}, tracked_macs, valid_policy_ids
+        if user.affected_policies
     )
-    return {
-        rule.mac: {
-            CONF_HOME_ENABLE_POLICIES: sorted(rule.home_enable),
-            CONF_HOME_DISABLE_POLICIES: sorted(rule.home_disable),
-            CONF_AWAY_ENABLE_POLICIES: sorted(rule.away_enable),
-            CONF_AWAY_DISABLE_POLICIES: sorted(rule.away_disable),
-        }
-        for rule in parsed
-    }
 
 
 def resolve_policy_intents(
@@ -139,11 +65,11 @@ def resolve_policy_intents(
     disable: set[str] = set()
     blocked: set[str] = set()
     for rule in rules:
-        state = presence.get(rule.mac)
-        if state is None or state.is_connected is None:
+        is_home = aggregate_presence(rule, presence)
+        if is_home is None:
             blocked.update(rule.affected_policies)
             continue
-        enable_intents, disable_intents = rule.intents_for(state.is_connected)
+        enable_intents, disable_intents = rule.intents_for(is_home)
         enable.update(enable_intents)
         disable.update(disable_intents)
 

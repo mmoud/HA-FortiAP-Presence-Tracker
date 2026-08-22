@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import FortiGatePolicyConfigEntry, tracked_macs_from_options
 from .const import CONF_FRIENDLY_NAME, CONF_TRACKED_CLIENTS, CONF_VDOM, DOMAIN
 from .coordinator import FortiGateWifiCoordinator
+from .policy_config import configured_policies
+from .presence_users import PresenceUser, aggregate_presence, configured_presence_users
 
 
 async def async_setup_entry(
@@ -30,6 +32,12 @@ async def async_setup_entry(
     tracked_clients = entry.options.get(CONF_TRACKED_CLIENTS, {})
     if not isinstance(tracked_clients, Mapping):
         tracked_clients = {}
+    tracked_macs = tracked_macs_from_options(entry.options)
+    users = configured_presence_users(
+        entry.options,
+        tracked_macs,
+        {policy.policy_id for policy in configured_policies(entry.data)},
+    )
     async_add_entities(
         [
             FortiGateWifiClientTracker(
@@ -38,8 +46,9 @@ async def async_setup_entry(
                 mac,
                 _friendly_name(tracked_clients.get(mac)),
             )
-            for mac in sorted(tracked_macs_from_options(entry.options))
+            for mac in sorted(tracked_macs)
         ]
+        + [FortiGatePresenceUserTracker(entry, coordinator, user) for user in users]
     )
 
 
@@ -153,3 +162,48 @@ class FortiGateWifiClientTracker(
                 if value is not None:
                     attributes[key] = value
         return attributes
+
+
+class FortiGatePresenceUserTracker(
+    CoordinatorEntity[FortiGateWifiCoordinator], ScannerEntity
+):
+    """Aggregate tracker: any device home means home; every device away means away."""
+
+    _attr_has_entity_name = False
+    _attr_icon = "mdi:account-multiple-check"
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        entry: FortiGatePolicyConfigEntry,
+        coordinator: FortiGateWifiCoordinator,
+        user: PresenceUser,
+    ) -> None:
+        super().__init__(coordinator)
+        self._user = user
+        self._attr_unique_id = f"{entry.entry_id}_presence_user_{user.user_id}"
+        self._attr_name = user.name
+        self._attr_suggested_object_id = user.name.lower().replace(" ", "_")
+
+    @property
+    def is_connected(self) -> bool | None:
+        """Aggregate only already grace-aware member states."""
+        if self.coordinator.data is None:
+            return None
+        return aggregate_presence(self._user, self.coordinator.data.presence)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose stable group information without high-churn Wi-Fi data."""
+        return {
+            "device_count": len(self._user.macs),
+            "home_device_count": (
+                sum(
+                    self.coordinator.data.presence.get(mac) is not None
+                    and self.coordinator.data.presence[mac].is_connected is True
+                    for mac in self._user.macs
+                )
+                if self.coordinator.data is not None
+                else None
+            ),
+        }

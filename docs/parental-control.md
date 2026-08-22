@@ -4,9 +4,9 @@ This integration supplies:
 
 - a presence binary sensor for each selected Wi-Fi client
 - a verified switch for each selected FortiGate firewall policy
-- optional per-tracker rules that map home and away state to policy state
+- optional user rules that combine multiple trackers and map home/away to policy state
 
-The built-in rules cover normal per-device parental control. Home Assistant automations remain available for schedules, groups, or other conditions.
+The built-in rules cover normal per-user parental control. Home Assistant automations remain available for schedules or other conditions.
 
 ## Before starting
 
@@ -24,18 +24,18 @@ In Home Assistant, confirm these entities work independently before creating an 
 
 Use the actual entity IDs from **Settings > Devices & services > Entities**.
 
-## Built-in presence policy rules
+## Built-in user policy rules
 
-Open **Settings > Devices & services > FortiAP Presence Tracker > Configure > Presence policy rules**. Select a tracker, then choose any combination of:
+Open **Settings > Devices & services > FortiAP Presence Tracker > Configure > Users and policy rules**. Add a user, assign one or more tracked devices, then choose any combination of:
 
 - policies to enable while home
 - policies to disable while home
 - policies to enable while away
 - policies to disable while away
 
-Save and repeat for other trackers. Each tracker keeps an independent profile and can control one policy or several. Leave all four lists empty to remove that tracker's profile.
+Save and repeat for other people. Each user has an aggregate device tracker and presence binary sensor and can control one policy or several. Policy fields may be left empty when the aggregate entities are only needed for Home Assistant automations.
 
-Rules are state-based and are reconciled after valid Wi-Fi or policy updates. If several profiles affect the same policy, disable wins. If any relevant tracker is unknown, the integration does not change that policy. A failed Wi-Fi poll therefore cannot act like a departure.
+One assigned device at home makes the user home immediately. The user becomes away only when every assigned device is away after its normal grace period. If none is home but any device is unknown, the user is unavailable. Rules are reconciled after valid Wi-Fi or policy updates; disable wins a conflict between users, and a failed Wi-Fi poll cannot act like a departure.
 
 The examples below use normal Home Assistant automations as an alternative when conditions beyond tracker state are needed.
 

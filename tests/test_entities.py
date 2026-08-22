@@ -16,6 +16,7 @@ from custom_components.fortigate_policy import (
 )
 from custom_components.fortigate_policy.api import Policy
 from custom_components.fortigate_policy.binary_sensor import (
+    FortiGatePresenceUserBinarySensor,
     FortiGateWifiPresenceBinarySensor,
 )
 from custom_components.fortigate_policy.button import FortiGateRefreshButton
@@ -36,6 +37,7 @@ from custom_components.fortigate_policy.const import (
     CONF_VDOM,
     CONF_VERIFY_SSL,
 )
+from custom_components.fortigate_policy.presence_users import PresenceUser
 from custom_components.fortigate_policy.switch import FortiGatePolicySwitch
 from custom_components.fortigate_policy.wifi import WifiPresence
 from tests.test_api import FakeResponse, FakeSession
@@ -97,6 +99,39 @@ class TestPresenceBinarySensor(unittest.TestCase):
         self.assertIsNone(entity.is_on)
         coordinator.last_update_success = False
         self.assertFalse(entity.available)
+
+    def test_user_sensor_aggregates_multiple_grace_aware_devices(self) -> None:
+        second_mac = "11:22:33:44:55:66"
+        coordinator = FakeWifiCoordinator(None)
+        coordinator.data = SimpleNamespace(
+            presence={
+                MAC: WifiPresence(False, None, NOW, None),
+                second_mac: WifiPresence(True, None, NOW, None),
+            }
+        )
+        user = PresenceUser(
+            "stable-user-id",
+            "Example user",
+            frozenset({MAC, second_mac}),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            frozenset(),
+        )
+        entity = FortiGatePresenceUserBinarySensor(
+            SimpleNamespace(entry_id="entry-1"),  # type: ignore[arg-type]
+            coordinator,  # type: ignore[arg-type]
+            user,
+        )
+
+        self.assertTrue(entity.is_on)
+        coordinator.data.presence[second_mac] = WifiPresence(False, None, NOW, None)
+        self.assertFalse(entity.is_on)
+        coordinator.data.presence[second_mac] = WifiPresence(None, None, None, None)
+        self.assertIsNone(entity.is_on)
+        self.assertEqual(
+            "entry-1_presence_user_stable-user-id_presence", entity.unique_id
+        )
 
 
 class TestWifiTrackerOptions(unittest.TestCase):

@@ -44,6 +44,7 @@
       "already_configured": "This FortiGate policy is already configured.",
       "no_trackers": "There are no configured Wi-Fi trackers to remove.",
       "no_policies": "There are no configured firewall policies.",
+      "no_presence_users": "There are no configured presence users.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -54,7 +55,10 @@
       "not_found": "The Wi-Fi monitor endpoint, VDOM, or configured policy was not found.",
       "rule_state_conflict": "A policy cannot be both enabled and disabled for the same presence state.",
       "select_at_least_one": "Select a discovered device or enter at least one valid MAC address.",
-      "select_tracker_to_remove": "Select at least one tracker to remove."
+      "select_tracker_to_remove": "Select at least one tracker to remove.",
+      "select_user_device": "Assign at least one tracked device to this user.",
+      "select_presence_user_to_remove": "Select at least one user to remove.",
+      "required": "This field is required."
     },
     "step": {
       "init": {
@@ -63,7 +67,7 @@
         "menu_options": {
           "firewall_policies": "Firewall policies",
           "wifi_clients": "Add or manage Wi-Fi trackers",
-          "presence_policy_rules": "Presence policy rules",
+          "presence_users": "Users and policy rules",
           "remove_wifi_trackers": "Remove Wi-Fi trackers",
           "wifi_settings": "Polling and sensors"
         }
@@ -78,21 +82,51 @@
           "policy_ids": "Example: 61, 72, 83. Leave empty to disable firewall-policy control."
         }
       },
-      "presence_policy_rules": {
-        "title": "Presence policy rules",
-        "description": "Choose a tracked device. Each device can control its own set of firewall policies.",
-        "data": {
-          "rule_tracker": "Tracked device"
+      "presence_users": {
+        "title": "Users and policy rules",
+        "description": "Combine a user's phone, watch, or other Wi-Fi devices into one presence state.",
+        "menu_options": {
+          "add_presence_user": "Add user",
+          "edit_presence_user": "Edit user",
+          "remove_presence_users": "Remove users"
         }
       },
-      "presence_policy_rule": {
-        "title": "Policy rules for {tracker}",
-        "description": "Choose the required policy state while this device is home and away. Leave all fields empty to remove this device's rule. If different devices conflict, disable wins. Unknown presence never changes a policy.",
+      "edit_presence_user": {
+        "title": "Edit presence user",
+        "description": "Choose the user to edit.",
         "data": {
+          "presence_user_id": "User"
+        }
+      },
+      "add_presence_user": {
+        "title": "Add presence user",
+        "description": "The user is home when any assigned device is home, and away only when every assigned device is away. Policy fields are optional.",
+        "data": {
+          "presence_user_name": "User name",
+          "presence_user_macs": "Devices",
           "home_enable_policies": "Enable while home",
           "home_disable_policies": "Disable while home",
           "away_enable_policies": "Enable while away",
           "away_disable_policies": "Disable while away"
+        }
+      },
+      "edit_presence_user_profile": {
+        "title": "Edit presence user",
+        "description": "The user is home when any assigned device is home, and away only when every assigned device is away. Unknown device state cannot produce a false away result.",
+        "data": {
+          "presence_user_name": "User name",
+          "presence_user_macs": "Devices",
+          "home_enable_policies": "Enable while home",
+          "home_disable_policies": "Disable while home",
+          "away_enable_policies": "Enable while away",
+          "away_disable_policies": "Disable while away"
+        }
+      },
+      "remove_presence_users": {
+        "title": "Remove presence users",
+        "description": "Removes the aggregate user trackers, presence sensors, and policy rules. Individual device trackers are not removed.",
+        "data": {
+          "presence_users_to_remove": "Users to remove"
         }
       },
       "wifi_settings": {

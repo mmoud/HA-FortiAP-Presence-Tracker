@@ -39,6 +39,8 @@ The person is saved only with the confirmed rule. If trackers or policies have n
 
 The **People and devices** page itself shows a read-only list of all configured people and their phones, watches, tablets, or other trackers. Use **Manage people** only when assignments need to change. If every tracker is already assigned, guided setup asks which existing person the new rule should follow. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
 
+If a device should count as home only on selected networks, use **People and devices > Limit trackers to Wi-Fi networks**. An empty selection accepts every FortiGate-managed SSID. A non-matching SSID starts the same conservative away grace period as a missing association; a failed FortiGate request remains unavailable and cannot trigger an away rule.
+
 Rules are reconciled only after valid Wi-Fi or policy updates. A failed Wi-Fi poll cannot act like a departure, and disable wins a conflict between equal-priority rules.
 
 The examples below use normal Home Assistant automations as an alternative when conditions beyond tracker state are needed.

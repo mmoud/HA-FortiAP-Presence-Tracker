@@ -193,6 +193,26 @@ class TestFortiGatePolicyApi(unittest.TestCase):
             str(url),
         )
 
+    def test_system_status_version_uses_configured_vdom(self) -> None:
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {"status": "success", "results": {"version": "v7.4.8"}},
+                )
+            ]
+        )
+
+        version = asyncio.run(api(session).async_get_fortios_version())
+
+        self.assertEqual("v7.4.8", version)
+        method, url, _kwargs = session.requests[0]
+        self.assertEqual("GET", method)
+        self.assertEqual(
+            "https://fortigate.example.test:9443/api/v2/monitor/system/status?vdom=root",
+            str(url),
+        )
+
     def test_wifi_monitor_tolerates_invalid_utf8_in_optional_label(self) -> None:
         """A bad optional hostname byte must not hide valid MAC presence."""
         raw_payload = (

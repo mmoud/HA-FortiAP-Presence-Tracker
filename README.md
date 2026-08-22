@@ -76,7 +76,7 @@ Open **Settings > Devices & services > FortiAP Presence Tracker**, find the conf
 The hub is organized by task:
 
 - **Guided policy-based parental control** creates a person and one firewall-policy rule in three reviewed steps: person and devices, policy behavior, then confirmation. Because this workflow automates a firewall policy, it requires at least one configured policy. The UI links to presence-only setup when policy control is not wanted.
-- **People and devices** displays every person and assigned device directly on its landing page, discovers clients, manages tracked devices, and combines a person's phone, watch, tablet, or other devices.
+- **People and devices** displays every person and assigned device directly on its landing page, discovers clients, manages tracked devices, limits individual trackers to selected SSIDs, and combines a person's phone, watch, tablet, or other devices.
 - **Parental-control rules** creates or edits prioritized firewall actions.
 - **Firewall policies** adds or removes optional verified policy switches.
 - **Advanced settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
@@ -107,6 +107,8 @@ GET /api/v2/monitor/wifi/client?vdom=<vdom>
 FortiOS response fields vary between releases. The integration normalizes known MAC, IP, hostname, SSID, FortiAP, radio, band, channel, VLAN, username, and association-time fields. Missing optional fields are ignored.
 
 The MAC address is the tracker's stable identity. Colon-separated, hyphenated, and compact MAC formats are normalized to the same value. Renaming a tracker does not change its unique ID.
+
+By default, an association on any FortiGate-managed SSID means home. To scope a device, open **People and devices > Limit trackers to Wi-Fi networks**, choose the tracker, and select one or more exact SSID names. A device seen on another SSID is treated as absent and follows the normal away grace period. SSID matching is case-sensitive. API failures still make the tracker unavailable; they are never treated as an SSID mismatch.
 
 ### Presence rules
 
@@ -175,6 +177,8 @@ The policy entity is a standard Home Assistant switch and can be included in Hom
 ## Troubleshooting
 
 Enable debug logging temporarily from the integration's **Enable debug logging** menu. Download the resulting diagnostics after reproducing the problem. Tokens and client identities are excluded from integration diagnostics.
+
+Diagnostics identify `fortiap_association` as the presence source and report whether per-tracker SSID filters are in use. FortiOS version is read from the Wi-Fi response when available; otherwise the integration tries `/api/v2/monitor/system/status` once as optional diagnostic enrichment. Failure of that optional request never affects presence.
 
 Common checks:
 

@@ -17,9 +17,11 @@ from wifi import (
     FortiGateWifiClient,
     WifiPresence,
     advance_presence,
+    client_matches_ssid_filter,
     enrich_wifi_clients,
     normalize_mac,
     parse_client_identities,
+    parse_fortios_version,
     parse_wifi_clients,
 )
 
@@ -100,6 +102,29 @@ class TestFortiGateWifiParser(unittest.TestCase):
         for value in ("AA:BB:CC:DD:EE:FF", "aa-bb-cc-dd-ee-ff", "aabbccddeeff"):
             self.assertEqual(MAC, normalize_mac(value))
         self.assertIsNone(normalize_mac("not-a-mac"))
+
+    def test_system_status_version_parsing_is_defensive(self) -> None:
+        self.assertEqual(
+            "v7.4.8",
+            parse_fortios_version(
+                {"status": "success", "results": {"version": "v7.4.8"}}
+            ),
+        )
+        self.assertEqual(
+            "v7.6.1", parse_fortios_version({"status": "success", "version": "v7.6.1"})
+        )
+        with self.assertRaises(ValueError):
+            parse_fortios_version({"status": "error", "results": {}})
+
+    def test_ssid_filter_is_exact_and_empty_means_any_managed_ssid(self) -> None:
+        associated = client(ssid="Home")
+        self.assertIs(associated, client_matches_ssid_filter(associated, frozenset()))
+        self.assertIs(
+            associated,
+            client_matches_ssid_filter(associated, frozenset({"Home", "IoT"})),
+        )
+        self.assertIsNone(client_matches_ssid_filter(associated, frozenset({"home"})))
+        self.assertIsNone(client_matches_ssid_filter(None, frozenset({"Home"})))
 
     def test_detected_device_and_dhcp_identity_enrichment(self) -> None:
         detected = parse_client_identities(
@@ -217,6 +242,21 @@ class TestConservativePresence(unittest.TestCase):
         after_failed_poll = home
         self.assertTrue(after_failed_poll.is_connected)
         self.assertIsNone(after_failed_poll.missing_since)
+
+    def test_nonmatching_ssid_uses_normal_away_grace_period(self) -> None:
+        home_client = client(ssid="Home")
+        home = advance_presence(
+            None,
+            client_matches_ssid_filter(home_client, frozenset({"Home"})),
+            NOW,
+            GRACE,
+        )
+        filtered = client_matches_ssid_filter(client(ssid="Guest"), frozenset({"Home"}))
+        missing = advance_presence(home, filtered, NOW + timedelta(seconds=30), GRACE)
+        away = advance_presence(missing, filtered, NOW + timedelta(seconds=210), GRACE)
+
+        self.assertTrue(missing.is_connected)
+        self.assertFalse(away.is_connected)
 
     def test_multiple_clients_progress_independently(self) -> None:
         other = "11:22:33:44:55:66"

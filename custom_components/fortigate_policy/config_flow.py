@@ -36,6 +36,7 @@ from .api import (
     FortiGatePolicyApi,
 )
 from .const import (
+    CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
     CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_FRIENDLY_NAME,
@@ -322,18 +323,29 @@ def _selected_wifi_macs(selected: object, manual: object) -> list[str]:
 
 def _preserved_client_names(
     selected_macs: list[str], tracked: object
-) -> dict[str, dict[str, str]]:
-    """Keep friendly names for trackers that remain selected."""
+) -> dict[str, dict[str, Any]]:
+    """Keep tracker metadata for clients that remain selected."""
     if not isinstance(tracked, dict):
         return {}
-    preserved: dict[str, dict[str, str]] = {}
+    preserved: dict[str, dict[str, Any]] = {}
     for mac, metadata in tracked.items():
         normalized = normalize_mac(mac)
         if normalized not in selected_macs or not isinstance(metadata, dict):
             continue
+        settings: dict[str, Any] = {}
         name = metadata.get(CONF_FRIENDLY_NAME)
         if isinstance(name, str) and name.strip():
-            preserved[normalized] = {CONF_FRIENDLY_NAME: name.strip()}
+            settings[CONF_FRIENDLY_NAME] = name.strip()
+        allowed_ssids = metadata.get(CONF_ALLOWED_SSIDS)
+        if isinstance(allowed_ssids, list):
+            normalized_ssids = sorted(
+                {ssid for ssid in allowed_ssids if isinstance(ssid, str) and ssid},
+                key=str.casefold,
+            )
+            if normalized_ssids:
+                settings[CONF_ALLOWED_SSIDS] = normalized_ssids
+        if settings:
+            preserved[normalized] = settings
     return preserved
 
 
@@ -545,17 +557,19 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
     _SELECTED_CLIENTS = "selected_wifi_clients"
     _MANUAL_MACS = "manual_wifi_macs"
     _TRACKERS_TO_REMOVE = "wifi_trackers_to_remove"
+    _FILTER_TRACKER = "wifi_filter_tracker"
 
     def __init__(self) -> None:
         """Keep state during the select-then-name native options flow."""
         self._new_options: dict[str, Any] = {}
         self._recent_clients: dict[str, dict[str, str]] = {}
         self._selected_macs: list[str] = []
-        self._named_clients: dict[str, dict[str, str]] = {}
+        self._named_clients: dict[str, dict[str, Any]] = {}
         self._presence_user_id: str | None = None
         self._policy_rule_id: str | None = None
         self._pending_policy_rule: dict[str, Any] | None = None
         self._pending_guided_user: dict[str, Any] | None = None
+        self._tracker_filter_mac: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -585,7 +599,9 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         user_count = len(users) if isinstance(users, dict) else 0
         menu = ["wifi_clients"]
         if tracked_count:
-            menu.extend(["presence_users", "remove_wifi_trackers"])
+            menu.extend(
+                ["wifi_tracker_filters", "presence_users", "remove_wifi_trackers"]
+            )
         overview = _people_overview(dict(self.config_entry.options))
         return self.async_show_menu(
             step_id="people_devices",
@@ -1578,6 +1594,87 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             data_schema=_settings_schema(dict(self.config_entry.options)),
         )
 
+    async def async_step_wifi_tracker_filters(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose a tracked wireless client whose SSID scope should change."""
+        if not self._tracker_options():
+            return self.async_abort(reason="no_trackers")
+        if user_input is not None:
+            selected = normalize_mac(user_input.get(self._FILTER_TRACKER))
+            if selected in set(self._selected_from_options()):
+                self._tracker_filter_mac = selected
+                return await self.async_step_wifi_tracker_filter()
+        return self.async_show_form(
+            step_id="wifi_tracker_filters",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(self._FILTER_TRACKER): SelectSelector(
+                        SelectSelectorConfig(options=self._tracker_options())
+                    )
+                }
+            ),
+        )
+
+    async def async_step_wifi_tracker_filter(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Limit one tracker to associations on selected SSIDs."""
+        mac = self._tracker_filter_mac
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        tracked_key = (
+            next((key for key in tracked if normalize_mac(key) == mac), None)
+            if mac is not None and isinstance(tracked, dict)
+            else None
+        )
+        if mac is None or not isinstance(tracked, dict) or tracked_key is None:
+            return await self.async_step_wifi_tracker_filters()
+        metadata = tracked.get(tracked_key)
+        current = dict(metadata) if isinstance(metadata, dict) else {}
+        if user_input is not None:
+            raw_ssids = user_input.get(CONF_ALLOWED_SSIDS, [])
+            if not isinstance(raw_ssids, list):
+                raw_ssids = []
+            allowed_ssids = sorted(
+                {ssid for ssid in raw_ssids if isinstance(ssid, str) and ssid},
+                key=str.casefold,
+            )
+            if allowed_ssids:
+                current[CONF_ALLOWED_SSIDS] = allowed_ssids
+            else:
+                current.pop(CONF_ALLOWED_SSIDS, None)
+            updated = dict(tracked)
+            if tracked_key != mac:
+                updated.pop(tracked_key, None)
+            updated[mac] = current
+            return self.async_create_entry(
+                data={
+                    **dict(self.config_entry.options),
+                    CONF_TRACKED_CLIENTS: updated,
+                }
+            )
+
+        current_ssids = current.get(CONF_ALLOWED_SSIDS, [])
+        if not isinstance(current_ssids, list):
+            current_ssids = []
+        return self.async_show_form(
+            step_id="wifi_tracker_filter",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_ALLOWED_SSIDS, default=current_ssids
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._known_ssids(),
+                            multiple=True,
+                            custom_value=True,
+                        )
+                    )
+                }
+            ),
+            description_placeholders={"tracker": self._tracker_name(mac)},
+        )
+
     async def async_step_wifi_clients(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -1808,3 +1905,31 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 if isinstance(name, str) and name.strip():
                     return name.strip()
         return mac
+
+    def _known_ssids(self) -> list[str]:
+        """Return recently observed and already configured wireless networks."""
+        ssids = {
+            metadata["ssid"]
+            for metadata in self._recent_clients.values()
+            if isinstance(metadata.get("ssid"), str) and metadata["ssid"]
+        }
+        recent = self.config_entry.options.get(CONF_RECENT_WIFI_CLIENTS, {})
+        if isinstance(recent, dict):
+            ssids.update(
+                metadata["ssid"]
+                for metadata in recent.values()
+                if isinstance(metadata, dict)
+                and isinstance(metadata.get("ssid"), str)
+                and metadata["ssid"]
+            )
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        if isinstance(tracked, dict):
+            for metadata in tracked.values():
+                if not isinstance(metadata, dict):
+                    continue
+                allowed = metadata.get(CONF_ALLOWED_SSIDS, [])
+                if isinstance(allowed, list):
+                    ssids.update(
+                        ssid for ssid in allowed if isinstance(ssid, str) and ssid
+                    )
+        return sorted(ssids, key=str.casefold)

@@ -18,6 +18,7 @@ from .wifi import (
     FortiGateWifiClient,
     enrich_wifi_clients,
     parse_client_identities,
+    parse_fortios_version,
     parse_wifi_clients,
 )
 
@@ -95,6 +96,13 @@ class FortiGatePolicyApi:
             path="/api/v2/monitor/wifi/client",
             query={"vdom": vdom},
         )
+        self._system_status_url = URL.build(
+            scheme="https",
+            host=host,
+            port=port,
+            path="/api/v2/monitor/system/status",
+            query={"vdom": vdom},
+        )
 
         def monitor_url(path: str) -> URL:
             return URL.build(
@@ -160,6 +168,18 @@ class FortiGatePolicyApi:
         except ValueError as err:
             raise FortiGateConnectionError(
                 "FortiGate returned an unexpected Wi-Fi client response"
+            ) from err
+
+    async def async_get_fortios_version(self) -> str | None:
+        """Read FortiOS version information without exposing appliance identity."""
+        payload = await self._async_request(
+            "GET", self._system_status_url, allow_monitor_json_fallback=True
+        )
+        try:
+            return parse_fortios_version(payload)
+        except ValueError as err:
+            raise FortiGateConnectionError(
+                "FortiGate returned an unexpected system status response"
             ) from err
 
     async def async_get_wifi_client_catalog(

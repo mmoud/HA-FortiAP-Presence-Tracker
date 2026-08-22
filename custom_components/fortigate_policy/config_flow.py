@@ -144,6 +144,56 @@ def _options_hub_summary(
     }
 
 
+def _people_overview(options: dict[str, Any]) -> dict[str, str]:
+    """Build a readable, non-editable summary of people and assigned devices."""
+    tracked = options.get(CONF_TRACKED_CLIENTS, {})
+    users = options.get(CONF_PRESENCE_USERS, {})
+    if not isinstance(tracked, dict):
+        tracked = {}
+    if not isinstance(users, dict):
+        users = {}
+
+    def clean(value: object) -> str:
+        return " ".join(str(value).split())
+
+    tracked_by_mac = {
+        normalized: metadata
+        for raw_mac, metadata in tracked.items()
+        if (normalized := normalize_mac(raw_mac)) is not None
+    }
+
+    lines: list[str] = []
+    sortable_users = sorted(
+        (user for user in users.values() if isinstance(user, dict)),
+        key=lambda user: clean(user.get(CONF_PRESENCE_USER_NAME, "")).casefold(),
+    )
+    for user in sortable_users:
+        name = clean(user.get(CONF_PRESENCE_USER_NAME, "Unnamed person"))
+        device_names: list[str] = []
+        for raw_mac in user.get(CONF_PRESENCE_USER_MACS, []):
+            mac = normalize_mac(raw_mac)
+            if mac is None:
+                continue
+            metadata = tracked_by_mac.get(mac, {})
+            friendly_name = (
+                metadata.get(CONF_FRIENDLY_NAME) if isinstance(metadata, dict) else None
+            )
+            device_names.append(clean(friendly_name or mac))
+        devices = ", ".join(device_names) if device_names else "No assigned devices"
+        try:
+            grace = int(
+                user.get(CONF_USER_AWAY_GRACE_PERIOD, DEFAULT_USER_AWAY_GRACE_PERIOD)
+            )
+        except (TypeError, ValueError):
+            grace = DEFAULT_USER_AWAY_GRACE_PERIOD
+        lines.append(f"• {name}: {devices} · Away grace {grace}s")
+
+    return {
+        "count": str(len(sortable_users)),
+        "people": "\n\n".join(lines) if lines else "No people are configured.",
+    }
+
+
 def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the UI form for all connection-critical settings."""
     defaults = defaults or {}
@@ -535,6 +585,8 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         user_count = len(users) if isinstance(users, dict) else 0
         menu = ["wifi_clients"]
         if tracked_count:
+            if user_count:
+                menu.append("view_presence_users")
             menu.extend(["presence_users", "remove_wifi_trackers"])
         return self.async_show_menu(
             step_id="people_devices",
@@ -543,6 +595,19 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 "tracked": str(tracked_count),
                 "users": str(user_count),
             },
+        )
+
+    async def async_step_view_presence_users(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """List every configured person and assigned device without editing."""
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        if not isinstance(users, dict) or not users:
+            return self.async_abort(reason="no_presence_users")
+        return self.async_show_menu(
+            step_id="view_presence_users",
+            menu_options=["presence_users"],
+            description_placeholders=_people_overview(dict(self.config_entry.options)),
         )
 
     async def async_step_parental_controls(
@@ -583,11 +648,20 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         if not isinstance(tracked, dict) or not tracked:
             return await self.async_step_wifi_clients()
         if not configured_policies(self.config_entry.data):
-            return await self.async_step_firewall_policies()
+            return await self.async_step_guided_policy_required()
         if not self._unassigned_tracker_options():
             return self.async_abort(reason="all_trackers_assigned")
         self._presence_user_id = self._presence_user_id or uuid4().hex
         return await self.async_step_guided_person(user_input)
+
+    async def async_step_guided_policy_required(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Explain why policy control is required by the automation wizard."""
+        return self.async_show_menu(
+            step_id="guided_policy_required",
+            menu_options=["firewall_policies", "presence_users"],
+        )
 
     async def async_step_guided_person(
         self, user_input: dict[str, Any] | None = None

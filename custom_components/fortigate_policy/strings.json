@@ -3,26 +3,32 @@
     "step": {
       "user": {
         "title": "Connect to FortiGate",
-        "description": "Policy control is optional. Leave policy IDs empty for Wi-Fi tracking only, or enter one or more comma-separated IDs to create policy switches.",
+        "description": "Choose what this connection should provide. For presence tracking only, leave policy IDs empty. Add policy IDs only when Home Assistant should expose those existing FortiGate rules as switches or control them from parental-control rules. The integration changes only each selected policy's enabled/disabled status.",
         "data": {
           "host": "FortiGate hostname or IP address",
           "port": "HTTPS port",
           "vdom": "VDOM",
-          "policy_ids": "Firewall policy IDs (optional, comma-separated)",
+          "policy_ids": "Firewall policy IDs (optional — enables policy control)",
           "api_token": "REST API token",
           "verify_ssl": "Verify FortiGate TLS certificate"
+        },
+        "data_description": {
+          "policy_ids": "Numeric IDs of existing FortiGate firewall policies, for example 61, 72. Leave empty for tracker-only use. This does not create or change policy contents."
         }
       },
       "reconfigure": {
         "title": "Reconfigure FortiGate",
-        "description": "Leave policy IDs empty for Wi-Fi tracking only. Enter the API token again because its saved value is not shown.",
+        "description": "Policy control is optional. Leave policy IDs empty for presence tracking only; add IDs to create verified switches and allow parental-control rules to toggle those policies. Enter the API token again because its saved value is not shown.",
         "data": {
           "host": "FortiGate hostname or IP address",
           "port": "HTTPS port",
           "vdom": "VDOM",
-          "policy_ids": "Firewall policy IDs (optional, comma-separated)",
+          "policy_ids": "Firewall policy IDs (optional — enables policy control)",
           "api_token": "REST API token",
           "verify_ssl": "Verify FortiGate TLS certificate"
+        },
+        "data_description": {
+          "policy_ids": "Numeric IDs of existing FortiGate firewall policies. Removing every ID disables policy control but keeps Wi-Fi trackers and people."
         }
       },
       "reauth_confirm": {
@@ -72,7 +78,7 @@
         "title": "FortiAP Presence Tracker",
         "description": "Tracked devices: {tracked} · People: {users} · Parental-control rules: {rules} · Firewall policies: {policies}. Automatic enforcement: {automation}.",
         "menu_options": {
-          "guided_parental_control": "Guided parental-control setup",
+          "guided_parental_control": "Guided policy-based parental control",
           "people_devices": "People and devices",
           "parental_controls": "Parental-control rules",
           "firewall_policies": "Firewall policies",
@@ -84,8 +90,16 @@
         "description": "Manage {tracked} tracked devices and {users} people. A person can include a phone, watch, tablet, or any combination of tracked devices.",
         "menu_options": {
           "wifi_clients": "Add or manage tracked devices",
+          "view_presence_users": "View people and assigned devices",
           "presence_users": "Manage people",
           "remove_wifi_trackers": "Remove tracked devices"
+        }
+      },
+      "view_presence_users": {
+        "title": "People overview",
+        "description": "{count} configured people:\n\n{people}\n\nThis page is read-only. Use Manage people and assignments only when you want to make changes.",
+        "menu_options": {
+          "presence_users": "Manage people and assignments"
         }
       },
       "parental_controls": {
@@ -112,9 +126,17 @@
           "user_away_grace_period": "Away grace period (seconds)"
         }
       },
+      "guided_policy_required": {
+        "title": "This guide creates a policy automation rule",
+        "description": "The guided parental-control workflow links a person's presence to an existing FortiGate firewall policy, so at least one policy must be configured. A policy ID tells Home Assistant exactly which existing rule it may enable or disable; the integration does not change that rule's addresses, services, action, schedule, NAT, interfaces, or order.\n\nIf you only need presence entities, choose Create presence-only people instead. No firewall policy is required.",
+        "menu_options": {
+          "firewall_policies": "Add firewall policy control",
+          "presence_users": "Create presence-only people"
+        }
+      },
       "guided_policy": {
         "title": "Guided setup: policy behavior",
-        "description": "Step 2 of 3. Choose when the rule applies and exactly which verified policies it controls. You will review everything before saving.",
+        "description": "Step 2 of 3. This wizard creates an automatic link between the person's presence and existing firewall policies. Choose when it applies and whether those policies should be enabled or disabled. Only policy status is changed, and you will review the exact rule before saving.",
         "data": {
           "policy_rule_name": "Rule name",
           "policy_rule_presence": "When the person is",
@@ -126,7 +148,7 @@
       },
       "firewall_policies": {
         "title": "Firewall policies",
-        "description": "Add policy switches with a comma-separated list, or leave this empty for Wi-Fi tracking only. Every listed policy is verified before reloading.",
+        "description": "Policy control is optional. Add numeric IDs of existing FortiGate policies to create verified switches and make them available to parental-control rules. Leave this empty for presence tracking only. The integration changes only policy status and verifies every ID before reloading.",
         "data": {
           "policy_ids": "Firewall policy IDs (optional, comma-separated)"
         },

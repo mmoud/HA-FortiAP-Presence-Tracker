@@ -28,7 +28,7 @@ Use the actual entity IDs from **Settings > Devices & services > Entities**.
 
 Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**. The first page summarizes the configured devices, people, rules, policies, and enforcement mode.
 
-For a new person, choose **Guided parental-control setup**:
+For a new policy-controlled person, choose **Guided policy-based parental control**. This wizard intentionally requires a configured firewall policy because its result is an automatic rule that enables or disables that policy. A policy ID identifies an existing FortiGate rule; the integration changes only its status. For presence entities without policy automation, use **People and devices > Manage people** instead.
 
 1. Name the person and select all of their tracked devices.
 2. Choose whether the rule applies while home or away.
@@ -37,7 +37,7 @@ For a new person, choose **Guided parental-control setup**:
 
 The person is saved only with the confirmed rule. If trackers or policies have not been configured yet, guided setup opens the missing prerequisite screen first.
 
-Use **People and devices** to edit people or trackers. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
+Use **People and devices > View people and assigned devices** for a read-only list of all configured people and their phones, watches, tablets, or other trackers. Use **Manage people** only when assignments need to change. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
 
 Rules are reconciled only after valid Wi-Fi or policy updates. A failed Wi-Fi poll cannot act like a departure, and disable wins a conflict between equal-priority rules.
 

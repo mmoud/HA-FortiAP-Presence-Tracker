@@ -42,9 +42,9 @@ Keep the FortiGate management interface on a private network. Do not expose it t
 
 ## Policy switch
 
-The setup form requires the FortiGate host, HTTPS port, VDOM, API token, and TLS verification setting. Firewall policy IDs are optional: leave the field empty for Wi-Fi tracking only, or enter one ID or a comma-separated list such as `61, 72, 83`.
+The setup form requires the FortiGate host, HTTPS port, VDOM, API token, and TLS verification setting. Firewall policy IDs are optional. Leave the field empty when the integration will only create presence trackers and people. Enter one ID or a comma-separated list such as `61, 72, 83` only when Home Assistant should create switches for those existing policies or use them in built-in parental-control rules.
 
-Each supplied ID is read before the entry is saved. The returned policy name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. Add, remove, or clear IDs later with **Configure > Firewall policies**.
+Each supplied ID is the numeric ID of an existing FortiGate firewall policy. It is read before the entry is saved, its returned name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. The integration changes only the policy's enabled/disabled status. Add, remove, or clear IDs later with **Configure > Firewall policies**; clearing them does not remove Wi-Fi trackers or people.
 
 The switch uses these endpoints:
 
@@ -75,8 +75,8 @@ Open **Settings > Devices & services > FortiAP Presence Tracker**, find the conf
 
 The hub is organized by task:
 
-- **Guided parental-control setup** creates a person and one rule in three reviewed steps: person and devices, policy behavior, then confirmation.
-- **People and devices** discovers clients, manages tracked devices, and combines a person's phone, watch, tablet, or other devices.
+- **Guided policy-based parental control** creates a person and one firewall-policy rule in three reviewed steps: person and devices, policy behavior, then confirmation. Because this workflow automates a firewall policy, it requires at least one configured policy. The UI links to presence-only setup when policy control is not wanted.
+- **People and devices** discovers clients, provides a read-only overview of every person and assigned device, manages tracked devices, and combines a person's phone, watch, tablet, or other devices.
 - **Parental-control rules** creates or edits prioritized firewall actions.
 - **Firewall policies** adds or removes optional verified policy switches.
 - **Advanced settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.

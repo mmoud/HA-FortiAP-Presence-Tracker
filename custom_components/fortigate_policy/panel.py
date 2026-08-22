@@ -84,7 +84,7 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
 FRONTEND_FILE = "fortiap-panel.js"
-PANEL_VERSION = "3.2.4"
+PANEL_VERSION = "3.2.5"
 
 
 def _entry(hass: HomeAssistant, entry_id: str):

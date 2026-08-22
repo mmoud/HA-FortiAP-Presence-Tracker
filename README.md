@@ -103,33 +103,11 @@ The default polling interval is 30 seconds and the default away grace period is 
 
 Apple devices may use a private MAC address. Track the address shown by FortiGate for the required SSID. Apple's Fixed private address mode provides a stable address without disabling Private Wi-Fi Address globally.
 
-## Example automations
+## Parental control
 
-Use the entity IDs assigned by your Home Assistant installation.
+The presence binary sensor and policy switch can be joined with normal Home Assistant automations. Use the binary sensor for automation triggers: `on` means the device is connected, `off` means it has remained absent for the configured grace period, and `unavailable` means FortiGate state cannot be trusted.
 
-```yaml
-alias: Enable policy when phone arrives
-triggers:
-  - trigger: state
-    entity_id: binary_sensor.example_phone_presence
-    to: "on"
-actions:
-  - action: switch.turn_on
-    target:
-      entity_id: switch.fortigate_policy
-```
-
-```yaml
-alias: Disable policy when phone leaves
-triggers:
-  - trigger: state
-    entity_id: binary_sensor.example_phone_presence
-    to: "off"
-actions:
-  - action: switch.turn_off
-    target:
-      entity_id: switch.fortigate_policy
-```
+See [Parental control with FortiGate](docs/parental-control.md) for setup, single-device and multi-device examples, policy direction, failure behavior, and testing.
 
 ## HomeKit
 

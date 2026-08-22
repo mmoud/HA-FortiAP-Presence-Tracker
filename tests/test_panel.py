@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from custom_components.fortigate_policy.const import (
     CONF_WIFI_TRACKING_ENABLED,
 )
 from custom_components.fortigate_policy.panel import (
+    PANEL_VERSION,
     _client_payload,
     _normalize_configuration,
     _panel_data,
@@ -159,6 +161,13 @@ class TestPanelFrontend(unittest.TestCase):
 
         self.assertIn('href="/home"', source)
         self.assertIn("Back to Home Assistant overview", source)
+
+    def test_frontend_cache_version_matches_manifest(self) -> None:
+        manifest = json.loads(
+            (FRONTEND.parents[1] / "manifest.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(manifest["version"], PANEL_VERSION)
 
     def test_dashboard_uses_home_assistant_icons_and_semantic_metric_tones(
         self,

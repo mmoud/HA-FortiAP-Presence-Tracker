@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -45,6 +46,13 @@ from tests.test_api import FakeResponse, FakeSession
 MAC = "aa:bb:cc:dd:ee:ff"
 OTHER_MAC = "11:22:33:44:55:66"
 NOW = datetime(2026, 8, 22, 13, 0, tzinfo=UTC)
+FRONTEND = (
+    Path(__file__).parents[1]
+    / "custom_components"
+    / "fortigate_policy"
+    / "frontend"
+    / "fortiap-panel.js"
+)
 
 
 class FakeWifiCoordinator:
@@ -141,6 +149,22 @@ class TestPanelSnapshot(unittest.TestCase):
 
         self.assertNotIn("rssi", result)
         self.assertNotIn("snr", result)
+
+
+class TestPanelFrontend(unittest.TestCase):
+    """Keep essential full-page management controls prominent."""
+
+    def test_people_creation_precedes_large_discovery_catalog(self) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        people = source.index("<h2>People</h2>")
+        trackers = source.index("<h2>Tracked wireless devices</h2>")
+        discovered = source.index("<h2>Discovered clients</h2>")
+        self.assertLess(people, trackers)
+        self.assertLess(trackers, discovered)
+        self.assertIn('id="new-person-name"', source)
+        self.assertIn('data-action="add-person"', source)
+        self.assertIn('class="table-scroll"', source)
 
 
 class TestPanelValidation(unittest.TestCase):

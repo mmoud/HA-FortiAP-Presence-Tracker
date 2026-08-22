@@ -28,7 +28,7 @@ Use the actual entity IDs from **Settings > Devices & services > Entities**.
 
 Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**. This opens the full-page management panel. Its Overview shows configured devices, people, rules, policies, current health, and enforcement behavior together.
 
-For a new policy-controlled person, first add or discover their devices on **People & devices**, then add the person and assign those devices in the same view. Add existing FortiGate policy IDs and the person's rule under **Policies & rules**. A policy ID identifies an existing FortiGate rule; the integration changes only its status. Policy configuration remains optional for presence-only use.
+For a new policy-controlled person, open **People & devices**, enter the person's name at the top, and select **Add person**. Add or discover their devices below and assign the trackers to the person in the same view. Add existing FortiGate policy IDs and the person's rule under **Policies & rules**. A policy ID identifies an existing FortiGate rule; the integration changes only its status. Policy configuration remains optional for presence-only use.
 
 1. Name the person and select all of their tracked devices.
 2. Choose whether the rule applies while home or away.

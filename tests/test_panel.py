@@ -169,15 +169,23 @@ class TestPanelFrontend(unittest.TestCase):
 
         self.assertEqual(manifest["version"], PANEL_VERSION)
 
-    def test_dashboard_uses_home_assistant_icons_and_semantic_metric_tones(
+    def test_dashboard_uses_bundled_icons_and_semantic_metric_tones(
         self,
     ) -> None:
         source = FRONTEND.read_text(encoding="utf-8")
 
-        self.assertIn('<ha-icon icon="mdi:access-point-network">', source)
-        self.assertIn('"mdi:view-dashboard-outline"', source)
+        self.assertIn('ICON_BASE = "/fortiap_presence_static/icons"', source)
+        self.assertIn('"view-dashboard-outline"', source)
         self.assertIn("metric-card ${escapeHtml(tone)}", source)
         self.assertIn("aria-current", source)
+        for icon in (
+            "access-point-network",
+            "account-group",
+            "home-assistant",
+            "shield-check",
+            "view-dashboard-outline",
+        ):
+            self.assertTrue((FRONTEND.parent / "icons" / f"{icon}.svg").is_file())
 
     def test_people_creation_precedes_large_discovery_catalog(self) -> None:
         source = FRONTEND.read_text(encoding="utf-8")

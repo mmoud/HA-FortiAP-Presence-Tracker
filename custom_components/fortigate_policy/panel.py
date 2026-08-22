@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -70,6 +71,8 @@ from .const import (
     MIN_USER_AWAY_GRACE_PERIOD,
     MIN_WIFI_AWAY_GRACE_PERIOD,
     MIN_WIFI_POLL_INTERVAL,
+    STATUS_DISABLE,
+    STATUS_ENABLE,
 )
 from .policy_config import (
     PolicyDefinition,
@@ -83,8 +86,10 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-PANEL_VERSION = "3.3.1"
+PANEL_VERSION = "3.4.2"
 FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _entry(hass: HomeAssistant, entry_id: str):
@@ -333,6 +338,67 @@ async def websocket_get_entries(
             {"entry_id": entry.entry_id, "title": entry.title}
             for entry in hass.config_entries.async_entries(DOMAIN)
         ],
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/panel/policy/set",
+        vol.Required("entry_id"): str,
+        vol.Required("policy_id"): str,
+        vol.Required("status"): vol.In((STATUS_ENABLE, STATUS_DISABLE)),
+    }
+)
+@websocket_api.async_response
+async def websocket_set_policy_status(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run a verified status-only policy transaction from the dashboard."""
+    try:
+        entry = _entry(hass, msg["entry_id"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "not_found", str(err))
+        return
+
+    coordinator = entry.runtime_data.policy_coordinators.get(msg["policy_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            "The firewall policy is not configured for this integration",
+        )
+        return
+
+    try:
+        await coordinator.async_set_policy_status(msg["status"])
+    except FortiGateError as err:
+        _LOGGER.warning(
+            "Dashboard policy command failed for policy %s (%s)",
+            msg["policy_id"],
+            type(err).__name__,
+        )
+        await coordinator.async_request_refresh()
+        connection.send_error(
+            msg["id"],
+            "policy_command_failed",
+            "FortiGate rejected the command or the requested state could not be verified",
+        )
+        return
+
+    policy = coordinator.data
+    if policy is None or policy.status != msg["status"]:
+        connection.send_error(
+            msg["id"],
+            "policy_verification_failed",
+            "The firewall policy did not reach the requested state",
+        )
+        return
+    connection.send_result(
+        msg["id"],
+        {"id": policy.policy_id, "name": policy.name, "state": policy.status},
     )
 
 
@@ -627,6 +693,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     """Register the full-page panel and its authenticated WebSocket API."""
     websocket_api.async_register_command(hass, websocket_get_entries)
     websocket_api.async_register_command(hass, websocket_get_panel)
+    websocket_api.async_register_command(hass, websocket_set_policy_status)
     websocket_api.async_register_command(hass, websocket_save_panel)
     websocket_api.async_register_command(hass, websocket_discover_clients)
     if async_panel_exists(hass, PANEL_PATH):

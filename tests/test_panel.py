@@ -8,7 +8,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.const import CONF_HOST, CONF_PORT
 
@@ -37,6 +37,7 @@ from custom_components.fortigate_policy.panel import (
     _panel_data,
     _validate_policies,
     async_register_panel,
+    websocket_set_policy_status,
 )
 from custom_components.fortigate_policy.policy_config import PolicyDefinition
 from custom_components.fortigate_policy.wifi import (
@@ -86,6 +87,7 @@ def entry() -> SimpleNamespace:
     """Return a realistic loaded config entry without credentials in output."""
     wifi = FakeWifiCoordinator()
     return SimpleNamespace(
+        domain="fortigate_policy",
         entry_id="entry-1",
         title="FortiGate example.test",
         data={
@@ -212,6 +214,21 @@ class TestPanelFrontend(unittest.TestCase):
         self.assertIn(".save-note .muted{display:none}", source)
         self.assertIn('class="row add-row"', source)
 
+    def test_people_devices_actions_and_policy_controls_are_explicit(self) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        self.assertIn('["people","People","account-multiple-outline"]', source)
+        self.assertIn('["devices","Devices","cellphone-link"]', source)
+        self.assertNotIn("People & devices", source)
+        self.assertIn('class="editable"', source)
+        self.assertIn('class="btn track"', source)
+        self.assertIn('class="btn remove"', source)
+        self.assertIn('class="btn home"', source)
+        self.assertIn('class="btn refresh"', source)
+        self.assertIn('class="btn save"', source)
+        self.assertIn('data-action="set-policy"', source)
+        self.assertIn("panel/policy/set", source)
+
 
 class TestPanelValidation(unittest.TestCase):
     """Full-page saves preserve the same server-side safety boundaries."""
@@ -315,6 +332,78 @@ class TestPanelValidation(unittest.TestCase):
 
 
 class TestPanelRegistration(unittest.TestCase):
+    def test_policy_command_returns_only_verified_coordinator_state(self) -> None:
+        policy_coordinator = SimpleNamespace(
+            data=Policy("61", "Family access", "enable"),
+            async_request_refresh=AsyncMock(),
+        )
+
+        async def set_status(status: str) -> None:
+            policy_coordinator.data = Policy("61", "Family access", status)
+
+        policy_coordinator.async_set_policy_status = AsyncMock(side_effect=set_status)
+        panel_entry = entry()
+        panel_entry.runtime_data.policy_coordinators["61"] = policy_coordinator
+        hass = SimpleNamespace(
+            config_entries=SimpleNamespace(
+                async_get_entry=lambda entry_id: (
+                    panel_entry if entry_id == "entry-1" else None
+                )
+            )
+        )
+        connection = SimpleNamespace(send_result=Mock(), send_error=Mock())
+
+        asyncio.run(
+            websocket_set_policy_status.__wrapped__.__wrapped__(
+                hass,
+                connection,
+                {
+                    "id": 7,
+                    "entry_id": "entry-1",
+                    "policy_id": "61",
+                    "status": "disable",
+                },
+            )
+        )
+
+        policy_coordinator.async_set_policy_status.assert_awaited_once_with("disable")
+        connection.send_error.assert_not_called()
+        connection.send_result.assert_called_once_with(
+            7, {"id": "61", "name": "Family access", "state": "disable"}
+        )
+
+    def test_policy_command_failure_never_returns_requested_state(self) -> None:
+        policy_coordinator = SimpleNamespace(
+            data=Policy("61", "Family access", "enable"),
+            async_set_policy_status=AsyncMock(side_effect=FortiGateIdentityError()),
+            async_request_refresh=AsyncMock(),
+        )
+        panel_entry = entry()
+        panel_entry.runtime_data.policy_coordinators["61"] = policy_coordinator
+        hass = SimpleNamespace(
+            config_entries=SimpleNamespace(
+                async_get_entry=lambda _entry_id: panel_entry
+            )
+        )
+        connection = SimpleNamespace(send_result=Mock(), send_error=Mock())
+
+        asyncio.run(
+            websocket_set_policy_status.__wrapped__.__wrapped__(
+                hass,
+                connection,
+                {
+                    "id": 8,
+                    "entry_id": "entry-1",
+                    "policy_id": "61",
+                    "status": "disable",
+                },
+            )
+        )
+
+        policy_coordinator.async_request_refresh.assert_awaited_once()
+        connection.send_result.assert_not_called()
+        connection.send_error.assert_called_once()
+
     def test_registers_as_the_integration_config_panel(self) -> None:
         hass = SimpleNamespace(
             http=SimpleNamespace(async_register_static_paths=AsyncMock())
@@ -335,7 +424,7 @@ class TestPanelRegistration(unittest.TestCase):
         ):
             asyncio.run(async_register_panel(hass))  # type: ignore[arg-type]
 
-        self.assertEqual(4, register_command.call_count)
+        self.assertEqual(5, register_command.call_count)
         hass.http.async_register_static_paths.assert_awaited_once()
         register_panel.assert_awaited_once()
         kwargs = register_panel.await_args.kwargs

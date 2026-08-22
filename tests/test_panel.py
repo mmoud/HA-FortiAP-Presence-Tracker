@@ -201,6 +201,17 @@ class TestPanelFrontend(unittest.TestCase):
         self.assertIn('data-action="add-person"', source)
         self.assertIn('class="table-scroll"', source)
 
+    def test_phone_layout_keeps_navigation_and_forms_usable(self) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        self.assertIn("@media(max-width:560px)", source)
+        self.assertIn(".tabs{grid-template-columns:repeat(2,minmax(0,1fr))", source)
+        self.assertIn(".metric-card{grid-column:span 6", source)
+        self.assertIn("table.mobile-table thead{display:none}", source)
+        self.assertIn("content:attr(data-label)", source)
+        self.assertIn(".save-note .muted{display:none}", source)
+        self.assertIn('class="row add-row"', source)
+
 
 class TestPanelValidation(unittest.TestCase):
     """Full-page saves preserve the same server-side safety boundaries."""

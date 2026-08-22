@@ -18,6 +18,8 @@ from .api import FortiGatePolicyApi
 from .const import (
     CONF_API_TOKEN,
     CONF_POLL_INTERVAL,
+    CONF_PRESENCE_POLICY_RULES,
+    CONF_PRESENCE_USERS,
     CONF_TRACKED_CLIENTS,
     CONF_VDOM,
     CONF_VERIFY_SSL,
@@ -34,6 +36,11 @@ from .const import (
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
 from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
 from .policy_rules import PresencePolicyRuleManager, configured_presence_rules
+from .presence_users import (
+    configured_presence_users,
+    migrate_tracker_rules_to_users,
+    serialize_presence_users,
+)
 from .wifi import normalize_mac
 
 PLATFORMS: list[Platform] = [
@@ -70,7 +77,10 @@ def tracked_macs_from_options(options: Mapping[str, Any]) -> set[str]:
 
 
 def _cleanup_stale_wifi_registry_entries(
-    hass: HomeAssistant, entry_id: str, tracked_macs: set[str]
+    hass: HomeAssistant,
+    entry_id: str,
+    tracked_macs: set[str],
+    presence_user_ids: set[str] | None = None,
 ) -> None:
     """Remove tracker entities and devices no longer selected in Options."""
     prefix = f"{entry_id}_wifi_"
@@ -82,12 +92,26 @@ def _cleanup_stale_wifi_registry_entries(
             f"{prefix}{mac.replace(':', '')}_presence",
         )
     }
+    presence_user_ids = presence_user_ids or set()
+    user_prefix = f"{entry_id}_presence_user_"
+    retained_user_unique_ids = {
+        unique_id
+        for user_id in presence_user_ids
+        for unique_id in (
+            f"{user_prefix}{user_id}",
+            f"{user_prefix}{user_id}_presence",
+        )
+    }
     entity_registry = er.async_get(hass)
     for entity in er.async_entries_for_config_entry(entity_registry, entry_id):
         if (
             entity.platform == DOMAIN
             and entity.unique_id.startswith(prefix)
             and entity.unique_id not in retained_entity_unique_ids
+        ) or (
+            entity.platform == DOMAIN
+            and entity.unique_id.startswith(user_prefix)
+            and entity.unique_id not in retained_user_unique_ids
         ):
             entity_registry.async_remove(entity.entity_id)
 
@@ -155,7 +179,15 @@ async def async_setup_entry(
 
     wifi_coordinator: FortiGateWifiCoordinator | None = None
     tracked_macs = tracked_macs_from_options(entry.options)
-    _cleanup_stale_wifi_registry_entries(hass, entry.entry_id, tracked_macs)
+    presence_users = configured_presence_users(
+        entry.options, tracked_macs, set(policy_coordinators)
+    )
+    _cleanup_stale_wifi_registry_entries(
+        hass,
+        entry.entry_id,
+        tracked_macs,
+        {user.user_id for user in presence_users},
+    )
     if entry.options.get(
         CONF_WIFI_TRACKING_ENABLED, DEFAULT_WIFI_TRACKING_ENABLED
     ) and (tracked_macs or entry.options.get(CONF_WIFI_CLIENT_COUNT_SENSOR, False)):
@@ -201,7 +233,7 @@ async def async_migrate_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
     """Migrate entries without changing entity identity."""
-    if entry.version > 4:
+    if entry.version > 5:
         return False
     data = dict(entry.data)
     if entry.version == 1:
@@ -212,6 +244,25 @@ async def async_migrate_entry(
             data=data,
             title=fortigate_entry_title(data),
             version=4,
+        )
+    if entry.version < 5:
+        options = dict(entry.options)
+        tracked_macs = tracked_macs_from_options(options)
+        raw_users = options.get(CONF_PRESENCE_USERS, {})
+        if not isinstance(raw_users, Mapping) or not raw_users:
+            raw_users = migrate_tracker_rules_to_users(options, tracked_macs)
+        options[CONF_PRESENCE_USERS] = serialize_presence_users(
+            raw_users,
+            tracked_macs,
+            {policy.policy_id for policy in configured_policies(data)},
+        )
+        options.pop(CONF_PRESENCE_POLICY_RULES, None)
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            options=options,
+            title=fortigate_entry_title(data),
+            version=5,
         )
     return True
 

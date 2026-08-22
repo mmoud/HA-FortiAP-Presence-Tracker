@@ -6,7 +6,7 @@ It provides:
 
 - an optional verified switch for each configured firewall policy
 - `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
-- per-tracker rules that can enable or disable different policy sets at home and away
+- multi-device user profiles with independent home and away policy rules
 - an optional sensor showing the number of associated Wi-Fi clients
 - a read-only button for immediately refreshing policy and presence data
 - full setup and configuration through the Home Assistant UI
@@ -73,7 +73,7 @@ Open **Settings > Devices & services > FortiAP Presence Tracker**, find the conf
 
 - **Firewall policies** adds or removes optional firewall-policy switches.
 - **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
-- **Presence policy rules** assigns independent home and away policy states to each tracked device.
+- **Users and policy rules** combines one or more trackers into a user and assigns independent home and away policy states.
 - **Remove Wi-Fi trackers** deletes selected tracker entities, presence sensors, and their Home Assistant device entries without changing anything on FortiGate.
 - **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
 
@@ -87,6 +87,8 @@ On the tracker screen, enable Wi-Fi presence tracking, select one or more device
 - `binary_sensor.<device_name>_presence`, which is ON at home, OFF when away, and unavailable during a FortiGate/API failure
 
 Both entities use the same coordinator result and away grace period. The binary sensor does not add another FortiGate request.
+
+Under **Users and policy rules**, assign a phone, watch, tablet, or other selected trackers to one user. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The user is home as soon as any assigned device is home. The user becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the user is unavailable rather than away.
 
 Presence polling uses:
 
@@ -116,14 +118,14 @@ Apple devices may use a private MAC address. Track the address shown by FortiGat
 The integration can apply policy states directly from presence without separate Home Assistant automations:
 
 1. Configure the firewall policies and Wi-Fi trackers first.
-2. Open **Configure > Presence policy rules**.
-3. Select a tracked device.
-4. Choose policies to enable or disable while that device is home and while it is away.
-5. Repeat for each device that needs a different policy profile.
+2. Open **Configure > Users and policy rules**.
+3. Add a user and select all of that user's tracked devices.
+4. Choose policies to enable or disable while the user is home and away.
+5. Repeat for each person who needs a different policy profile.
 
-For example, one tracker can disable policy 1 while home, while another disables policies 1 and 2 while away. A profile with all four lists empty is removed.
+For example, a user with an iPhone and Apple Watch remains home while either device is connected. Another user can independently disable policies 1 and 2 while away. Policy fields are optional, so aggregate user trackers can also be used only in Home Assistant automations.
 
-Rules are evaluated from current state rather than only on transitions. This makes them recover correctly after a restart or a manual policy change. When rules disagree about a shared policy, disable wins. If a relevant tracker has unknown presence, or the Wi-Fi API is unavailable, that policy is left unchanged. Every change still uses the normal policy preflight, status-only write, and read-back verification.
+Rules are evaluated from aggregate current state rather than only on transitions. This makes them recover correctly after a restart or a manual policy change. When users' rules disagree about a shared policy, disable wins. Unknown aggregate presence or an unavailable Wi-Fi API leaves the policy unchanged. Every change still uses the normal policy preflight, status-only write, and read-back verification.
 
 The presence entities and policy switches remain available for normal Home Assistant automations when more complex conditions are required.
 

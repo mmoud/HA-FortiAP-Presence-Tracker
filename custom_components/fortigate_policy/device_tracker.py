@@ -13,7 +13,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import FortiGatePolicyConfigEntry, tracked_macs_from_options
+from . import (
+    FortiGatePolicyConfigEntry,
+    tracked_macs_from_options,
+    tracked_ssid_filters_from_options,
+)
 from .const import CONF_FRIENDLY_NAME, CONF_TRACKED_CLIENTS, CONF_VDOM, DOMAIN
 from .coordinator import FortiGateWifiCoordinator
 from .policy_config import configured_policies
@@ -82,6 +86,9 @@ class FortiGateWifiClientTracker(
         super().__init__(coordinator)
         self._entry = entry
         self._mac = mac
+        self._allowed_ssids = tracked_ssid_filters_from_options(entry.options).get(
+            mac, frozenset()
+        )
         self._attr_unique_id = f"{entry.entry_id}_wifi_{mac.replace(':', '')}"
         self._attr_name = friendly_name or mac
         self._attr_suggested_object_id = (
@@ -140,7 +147,10 @@ class FortiGateWifiClientTracker(
             "mac": self._mac,
             "vdom": self._entry.data[CONF_VDOM],
             "fortigate": self._entry.data[CONF_HOST],
+            "presence_source": "fortiap_association",
         }
+        if self._allowed_ssids:
+            attributes["allowed_ssids"] = sorted(self._allowed_ssids)
         if presence is None:
             return attributes
         if presence.last_seen:

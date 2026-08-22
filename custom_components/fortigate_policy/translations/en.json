@@ -89,6 +89,7 @@
         "description": "Manage {tracked} tracked devices and {users} people. A person can include a phone, watch, tablet, or any combination of tracked devices.\n\nConfigured people and assignments:\n\n{people}",
         "menu_options": {
           "wifi_clients": "Add or manage tracked devices",
+          "wifi_tracker_filters": "Limit trackers to Wi-Fi networks",
           "presence_users": "Manage people",
           "remove_wifi_trackers": "Remove tracked devices"
         }
@@ -262,6 +263,23 @@
           ,"policy_automation_dry_run": "Dry run (calculate but do not write)"
           ,"default_override_minutes": "Default manual override duration (minutes; 0 never expires)"
           ,"recent_client_retention_days": "Recently seen device retention (days)"
+        }
+      },
+      "wifi_tracker_filters": {
+        "title": "Wi-Fi network filters",
+        "description": "Choose a tracker to limit to one or more Wi-Fi networks. Trackers use any FortiGate-managed SSID unless a filter is configured.",
+        "data": {
+          "wifi_filter_tracker": "Tracker"
+        }
+      },
+      "wifi_tracker_filter": {
+        "title": "Wi-Fi network filter",
+        "description": "{tracker} is considered home only while FortiGate reports it on one of the selected SSIDs. Leave this empty to accept any FortiGate-managed SSID. Moving to another SSID uses the normal away grace period; a FortiGate API failure remains unavailable.",
+        "data": {
+          "allowed_ssids": "Allowed Wi-Fi networks (optional)"
+        },
+        "data_description": {
+          "allowed_ssids": "Select an observed SSID or enter its exact name. SSID matching is case-sensitive."
         }
       },
       "wifi_clients": {

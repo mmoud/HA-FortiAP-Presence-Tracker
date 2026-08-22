@@ -13,6 +13,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from custom_components.fortigate_policy import (
     _cleanup_stale_wifi_registry_entries,
     async_setup_entry,
+    tracked_ssid_filters_from_options,
 )
 from custom_components.fortigate_policy.api import Policy
 from custom_components.fortigate_policy.binary_sensor import (
@@ -32,6 +33,7 @@ from custom_components.fortigate_policy.config_flow import (
     _selected_wifi_macs,
 )
 from custom_components.fortigate_policy.const import (
+    CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
@@ -251,13 +253,34 @@ class TestWifiTrackerOptions(unittest.TestCase):
 
     def test_existing_names_are_preserved_only_for_selected_trackers(self) -> None:
         self.assertEqual(
-            {"aa:bb:cc:dd:ee:ff": {CONF_FRIENDLY_NAME: "Example phone"}},
+            {
+                "aa:bb:cc:dd:ee:ff": {
+                    CONF_FRIENDLY_NAME: "Example phone",
+                    CONF_ALLOWED_SSIDS: ["Home", "IoT"],
+                }
+            },
             _preserved_client_names(
                 ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"],
                 {
-                    "AA-BB-CC-DD-EE-FF": {CONF_FRIENDLY_NAME: " Example phone "},
+                    "AA-BB-CC-DD-EE-FF": {
+                        CONF_FRIENDLY_NAME: " Example phone ",
+                        CONF_ALLOWED_SSIDS: ["IoT", "Home", "Home"],
+                    },
                     "22:33:44:55:66:77": {CONF_FRIENDLY_NAME: "Removed"},
                 },
+            ),
+        )
+
+    def test_ssid_filters_are_normalized_by_mac_and_ignore_bad_values(self) -> None:
+        self.assertEqual(
+            {MAC: frozenset({"Home", "IoT"})},
+            tracked_ssid_filters_from_options(
+                {
+                    CONF_TRACKED_CLIENTS: {
+                        "AA-BB-CC-DD-EE-FF": {CONF_ALLOWED_SSIDS: ["Home", "IoT", 123]},
+                        "invalid": {CONF_ALLOWED_SSIDS: ["Guest"]},
+                    }
+                }
             ),
         )
 
@@ -407,12 +430,44 @@ class TestPolicyOptions(unittest.TestCase):
         result = asyncio.run(flow.async_step_people_devices())
 
         self.assertEqual(
-            ["wifi_clients", "presence_users", "remove_wifi_trackers"],
+            [
+                "wifi_clients",
+                "wifi_tracker_filters",
+                "presence_users",
+                "remove_wifi_trackers",
+            ],
             result["menu_options"],
         )
         self.assertEqual(
             "• Example person: Phone · Away grace 180s",
             result["description_placeholders"]["people"],
+        )
+
+    def test_wifi_tracker_filter_is_saved_without_changing_unique_identity(
+        self,
+    ) -> None:
+        entry = SimpleNamespace(
+            data={CONF_POLICIES: []},
+            options={
+                CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}},
+                "recent_wifi_clients": {MAC: {"ssid": "Home"}},
+            },
+        )
+        flow = self._options_flow(entry)
+
+        chooser = asyncio.run(flow.async_step_wifi_tracker_filters())
+        self.assertEqual("wifi_tracker_filters", chooser["step_id"])
+        form = asyncio.run(
+            flow.async_step_wifi_tracker_filters({flow._FILTER_TRACKER: MAC})
+        )
+        self.assertEqual("wifi_tracker_filter", form["step_id"])
+        result = asyncio.run(
+            flow.async_step_wifi_tracker_filter({CONF_ALLOWED_SSIDS: ["Home"]})
+        )
+
+        self.assertEqual(
+            ["Home"],
+            result["data"][CONF_TRACKED_CLIENTS][MAC][CONF_ALLOWED_SSIDS],
         )
 
     def test_guided_setup_uses_existing_person_when_all_devices_assigned(self) -> None:

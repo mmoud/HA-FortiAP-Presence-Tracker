@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from . import FortiGatePolicyConfigEntry
 from .const import (
+    CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
     CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_POLICY_AUTOMATION_DRY_RUN,
@@ -38,6 +39,17 @@ async def async_get_config_entry_diagnostics(
         for mac in tracked
         if isinstance(tracked, dict) and (normalized := normalize_mac(mac)) is not None
     }
+    ssid_filtered_tracker_count = (
+        sum(
+            1
+            for metadata in tracked.values()
+            if isinstance(metadata, dict)
+            and isinstance(metadata.get(CONF_ALLOWED_SSIDS), list)
+            and bool(metadata[CONF_ALLOWED_SSIDS])
+        )
+        if isinstance(tracked, dict)
+        else 0
+    )
     presence_users = configured_presence_users(
         entry.options,
         tracked_macs,
@@ -66,7 +78,10 @@ async def async_get_config_entry_diagnostics(
                 "tracked_client_count": (
                     len(tracked) if isinstance(tracked, dict) else 0
                 ),
+                "ssid_filtered_tracker_count": ssid_filtered_tracker_count,
+                "presence_source": "fortiap_association",
                 "endpoint": "/api/v2/monitor/wifi/client",
+                "system_status_endpoint": "/api/v2/monitor/system/status",
                 "last_successful_update": (
                     wifi.last_successful_update.isoformat()
                     if wifi and wifi.last_successful_update
@@ -80,6 +95,14 @@ async def async_get_config_entry_diagnostics(
                 ),
                 "fortios_version": (
                     wifi.data.fortios_version if wifi and wifi.data else None
+                ),
+                "fortios_version_source": (
+                    wifi.data.fortios_version_source if wifi and wifi.data else None
+                ),
+                "system_status_endpoint_supported": (
+                    wifi.data.system_status_endpoint_supported
+                    if wifi and wifi.data
+                    else None
                 ),
             },
             "presence_policy_rules": {

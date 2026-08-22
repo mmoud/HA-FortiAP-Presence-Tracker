@@ -167,6 +167,29 @@ def parse_wifi_clients(
     return clients, skipped, version
 
 
+def parse_fortios_version(payload: Mapping[str, Any]) -> str | None:
+    """Extract a FortiOS version from the system-status monitor response."""
+    status = payload.get("status")
+    if status is not None and status != "success":
+        raise ValueError("FortiGate system status request was not successful")
+    direct = _string(payload, "version", "firmware_version", "os_version")
+    if direct is not None:
+        return direct
+    results = payload.get("results")
+    if isinstance(results, Mapping):
+        return _string(results, "version", "firmware_version", "os_version")
+    return None
+
+
+def client_matches_ssid_filter(
+    client: FortiGateWifiClient | None, allowed_ssids: frozenset[str]
+) -> FortiGateWifiClient | None:
+    """Return an association only when it matches the optional SSID allowlist."""
+    if client is None or not allowed_ssids:
+        return client
+    return client if client.ssid in allowed_ssids else None
+
+
 def parse_client_identities(
     payload: Mapping[str, Any], source: str
 ) -> dict[str, FortiGateClientIdentity]:

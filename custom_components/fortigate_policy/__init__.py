@@ -19,6 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FortiGatePolicyApi
 from .const import (
+    CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
     CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_POLICY_AUTOMATION_DRY_RUN,
@@ -131,6 +132,29 @@ def tracked_macs_from_options(options: Mapping[str, Any]) -> set[str]:
         for mac in raw_clients
         if (normalized := normalize_mac(mac)) is not None
     }
+
+
+def tracked_ssid_filters_from_options(
+    options: Mapping[str, Any],
+) -> dict[str, frozenset[str]]:
+    """Read optional per-tracker SSID allowlists from persisted selections."""
+    raw_clients = options.get(CONF_TRACKED_CLIENTS, {})
+    if not isinstance(raw_clients, Mapping):
+        return {}
+    filters: dict[str, frozenset[str]] = {}
+    for raw_mac, metadata in raw_clients.items():
+        mac = normalize_mac(raw_mac)
+        if mac is None or not isinstance(metadata, Mapping):
+            continue
+        raw_ssids = metadata.get(CONF_ALLOWED_SSIDS, [])
+        if not isinstance(raw_ssids, list):
+            continue
+        allowed = frozenset(
+            ssid for ssid in raw_ssids if isinstance(ssid, str) and ssid
+        )
+        if allowed:
+            filters[mac] = allowed
+    return filters
 
 
 def _cleanup_stale_wifi_registry_entries(
@@ -257,6 +281,7 @@ async def async_setup_entry(
             entry.options.get(
                 CONF_WIFI_AWAY_GRACE_PERIOD, DEFAULT_WIFI_AWAY_GRACE_PERIOD
             ),
+            tracked_ssid_filters_from_options(entry.options),
         )
     rule_manager: PresencePolicyRuleManager | None = None
     if wifi_coordinator is not None and policy_coordinators:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -16,6 +17,7 @@ from .api import (
     FortiGateAuthError,
     FortiGateConnectionError,
     FortiGateError,
+    FortiGateNotFoundError,
     FortiGatePolicyApi,
     Policy,
 )
@@ -24,7 +26,13 @@ from .const import (
     UPDATE_RETRIES,
     UPDATE_RETRY_DELAY,
 )
-from .wifi import FortiGateWifiClient, WifiPresence, advance_presence, utcnow
+from .wifi import (
+    FortiGateWifiClient,
+    WifiPresence,
+    advance_presence,
+    client_matches_ssid_filter,
+    utcnow,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +119,8 @@ class FortiGateWifiData:
     presence: dict[str, WifiPresence]
     skipped_clients: int
     fortios_version: str | None
+    fortios_version_source: str | None
+    system_status_endpoint_supported: bool | None
     updated_at: datetime
 
 
@@ -125,6 +135,7 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
         tracked_macs: set[str],
         poll_interval: int,
         away_grace_period: int,
+        ssid_filters: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -137,26 +148,57 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
         )
         self.api = api
         self._tracked_macs = tracked_macs
+        self._ssid_filters = dict(ssid_filters or {})
         self._grace_period = timedelta(seconds=away_grace_period)
         self._restored_presence: dict[str, WifiPresence] = {}
         self.last_successful_update: datetime | None = None
+        self.fortios_version: str | None = None
+        self.fortios_version_source: str | None = None
+        self.system_status_endpoint_supported: bool | None = None
+        self._system_status_checked = False
 
     async def _async_update_data(self) -> FortiGateWifiData:
         """Fetch one valid client list; failures preserve tracker presence state."""
         try:
-            clients, skipped, fortios_version = await self.api.async_get_wifi_clients()
+            clients, skipped, response_version = await self.api.async_get_wifi_clients()
         except FortiGateError as err:
             # Crucially, failed polls do not run advance_presence(). Entities
             # become unavailable through CoordinatorEntity instead of away.
             raise UpdateFailed("Unable to determine FortiGate Wi-Fi clients") from err
 
         now = utcnow()
+        if response_version:
+            self.fortios_version = response_version
+            self.fortios_version_source = "wifi_client_response"
+        elif not self._system_status_checked:
+            self._system_status_checked = True
+            try:
+                status_version = await self.api.async_get_fortios_version()
+            except FortiGateNotFoundError:
+                self.system_status_endpoint_supported = False
+            except FortiGateError as err:
+                # System status is diagnostic enrichment. It must never make a
+                # successful Wi-Fi association poll unavailable.
+                _LOGGER.debug(
+                    "FortiGate system status enrichment unavailable: %s",
+                    type(err).__name__,
+                )
+            else:
+                self.system_status_endpoint_supported = True
+                if status_version:
+                    self.fortios_version = status_version
+                    self.fortios_version_source = "system_status"
         previous = (
             self.data.presence if self.data is not None else self._restored_presence
         )
         presence = {
             mac: advance_presence(
-                previous.get(mac), clients.get(mac), now, self._grace_period
+                previous.get(mac),
+                client_matches_ssid_filter(
+                    clients.get(mac), self._ssid_filters.get(mac, frozenset())
+                ),
+                now,
+                self._grace_period,
             )
             for mac in self._tracked_macs
         }
@@ -170,7 +212,15 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
         _LOGGER.debug(
             "FortiGate Wi-Fi client update succeeded: %s clients", len(clients)
         )
-        return FortiGateWifiData(clients, presence, skipped, fortios_version, now)
+        return FortiGateWifiData(
+            clients,
+            presence,
+            skipped,
+            self.fortios_version,
+            self.fortios_version_source,
+            self.system_status_endpoint_supported,
+            now,
+        )
 
     def presence_for(self, mac: str) -> WifiPresence | None:
         """Return cached state for an explicitly selected MAC address."""

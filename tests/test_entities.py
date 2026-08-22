@@ -15,6 +15,7 @@ from custom_components.fortigate_policy.api import Policy
 from custom_components.fortigate_policy.binary_sensor import (
     FortiGateWifiPresenceBinarySensor,
 )
+from custom_components.fortigate_policy.button import FortiGateRefreshButton
 from custom_components.fortigate_policy.config_flow import (
     _async_validate_input,
     _entry_data,
@@ -54,6 +55,14 @@ class FakePolicyCoordinator:
         self.data = policy
         self.last_update_success = True
         self.last_successful_check = NOW
+
+
+class FakeRefreshCoordinator:
+    def __init__(self) -> None:
+        self.refreshes = 0
+
+    async def async_request_refresh(self) -> None:
+        self.refreshes += 1
 
 
 class FakeConfigEntries:
@@ -182,6 +191,28 @@ class TestPolicySwitchEntities(unittest.TestCase):
         self.assertEqual("entry-1_policy_72", secondary.unique_id)
         self.assertEqual("61", primary.extra_state_attributes["policy_id"])
         self.assertEqual("72", secondary.extra_state_attributes["policy_id"])
+
+
+class TestRefreshButton(unittest.TestCase):
+    def test_refreshes_every_coordinator_without_writes(self) -> None:
+        policy_a = FakeRefreshCoordinator()
+        policy_b = FakeRefreshCoordinator()
+        wifi = FakeRefreshCoordinator()
+        entry = SimpleNamespace(
+            entry_id="entry-1",
+            runtime_data=SimpleNamespace(
+                policy_coordinators={"61": policy_a, "72": policy_b},
+                wifi_coordinator=wifi,
+            ),
+        )
+        button = FortiGateRefreshButton(entry)  # type: ignore[arg-type]
+
+        asyncio.run(button.async_press())
+
+        self.assertEqual(1, policy_a.refreshes)
+        self.assertEqual(1, policy_b.refreshes)
+        self.assertEqual(1, wifi.refreshes)
+        self.assertEqual("entry-1_refresh_data", button.unique_id)
 
 
 class TestMultiPolicyValidation(unittest.TestCase):

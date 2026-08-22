@@ -104,6 +104,11 @@
     }
   },
   "entity": {
+    "button": {
+      "refresh_data": {
+        "name": "Refresh data"
+      }
+    },
     "binary_sensor": {
       "presence": {
         "name": "Presence"

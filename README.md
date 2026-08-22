@@ -7,6 +7,7 @@ It provides:
 - an optional verified switch for each configured firewall policy
 - `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
 - an optional sensor showing the number of associated Wi-Fi clients
+- a read-only button for immediately refreshing policy and presence data
 - full setup and configuration through the Home Assistant UI
 
 ## Requirements
@@ -25,6 +26,8 @@ It provides:
 5. Search for **FortiGate** and complete the form.
 
 No YAML configuration is required.
+
+The FortiGate device includes a **Refresh data** button. It requests an immediate read of every configured policy and the shared Wi-Fi client dataset; it does not change firewall configuration.
 
 ## FortiGate API account
 

@@ -68,15 +68,59 @@
     },
     "step": {
       "init": {
-        "title": "FortiGate options",
-        "description": "Choose what to configure. {tracked} Wi-Fi tracker(s) are currently selected.",
+        "title": "FortiAP Presence Tracker",
+        "description": "Current setup: {tracked} tracked devices, {users} people, {rules} parental-control rules, and {policies} firewall policies. Automatic enforcement: {automation}.",
         "menu_options": {
+          "guided_parental_control": "Guided parental-control setup",
+          "people_devices": "People and devices",
+          "parental_controls": "Parental-control rules",
           "firewall_policies": "Firewall policies",
-          "wifi_clients": "Add or manage Wi-Fi trackers",
-          "presence_users": "Presence users",
-          "policy_rules": "Policy automation rules",
-          "remove_wifi_trackers": "Remove Wi-Fi trackers",
-          "wifi_settings": "Polling and sensors"
+          "advanced_settings": "Advanced settings"
+        }
+      },
+      "people_devices": {
+        "title": "People and devices",
+        "description": "Manage {tracked} tracked devices and {users} people. A person can include a phone, watch, tablet, or any combination of tracked devices.",
+        "menu_options": {
+          "wifi_clients": "Add or manage tracked devices",
+          "presence_users": "Manage people",
+          "remove_wifi_trackers": "Remove tracked devices"
+        }
+      },
+      "parental_controls": {
+        "title": "Parental-control rules",
+        "description": "Manage behavior for {users} people using {rules} rules. Unknown presence never triggers an away action.",
+        "menu_options": {
+          "guided_parental_control": "Create a guided rule",
+          "policy_rules": "Manage existing rules"
+        }
+      },
+      "advanced_settings": {
+        "title": "Advanced settings",
+        "description": "Polling, away timing, dry-run mode, enforcement, overrides, retention, and diagnostic sensors.",
+        "menu_options": {
+          "wifi_settings": "Polling, safety, and sensors"
+        }
+      },
+      "guided_person": {
+        "title": "Guided setup: person and devices",
+        "description": "Step 1 of 3. Name the person and select every device that should keep them home, such as a phone and watch.",
+        "data": {
+          "presence_user_name": "Person name",
+          "presence_user_macs": "Devices",
+          "user_away_grace_period": "Away grace period (seconds)"
+        }
+      },
+      "guided_policy": {
+        "title": "Guided setup: policy behavior",
+        "description": "Step 2 of 3. Choose when the rule applies and exactly which verified policies it controls. You will review everything before saving.",
+        "data": {
+          "policy_rule_name": "Rule name",
+          "policy_rule_presence": "When the person is",
+          "policy_rule_action": "Policy action",
+          "policy_rule_policies": "Firewall policies",
+          "policy_rule_priority": "Priority",
+          "policy_rule_schedule": "Schedule (optional)"
         }
       },
       "firewall_policies": {
@@ -142,6 +186,11 @@
       "policy_rule_preview": {
         "title": "Confirm policy rule",
         "description": "{name}: when {match} of {users} are {presence}, {action} policies {policies}. Priority: {priority}. Schedule: {schedule}. Current user states: {current_states}. Conflict check: {conflict}. Unknown required state blocks the write; equal-priority disable wins conflicts.",
+        "data": {"confirm": "I have reviewed this rule"}
+      },
+      "guided_policy_rule_preview": {
+        "title": "Guided setup: review and confirm",
+        "description": "Step 3 of 3. {name}: when {users} is {presence}, {action} policies {policies}. Priority: {priority}. Schedule: {schedule}. Conflict check: {conflict}. The person and rule are saved together only after confirmation. Unknown presence blocks the write.",
         "data": {"confirm": "I have reviewed this rule"}
       },
       "remove_policy_rules": {

@@ -21,9 +21,11 @@ from custom_components.fortigate_policy.binary_sensor import (
 )
 from custom_components.fortigate_policy.button import FortiGateRefreshButton
 from custom_components.fortigate_policy.config_flow import (
+    FortiGatePolicyOptionsFlow,
     _async_validate_input,
     _entry_data,
     _normalize,
+    _options_hub_summary,
     _policy_options_schema,
     _preserved_client_names,
     _selected_wifi_macs,
@@ -33,9 +35,28 @@ from custom_components.fortigate_policy.const import (
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
     CONF_POLICIES,
+    CONF_POLICY_AUTOMATION_DRY_RUN,
+    CONF_POLICY_AUTOMATION_ENABLED,
     CONF_POLICY_IDS,
+    CONF_POLICY_RULE_ACTION,
+    CONF_POLICY_RULE_MATCH,
+    CONF_POLICY_RULE_NAME,
+    CONF_POLICY_RULE_POLICIES,
+    CONF_POLICY_RULE_PRESENCE,
+    CONF_POLICY_RULE_PRIORITY,
+    CONF_POLICY_RULE_SCHEDULE,
+    CONF_POLICY_RULE_USERS,
+    CONF_POLICY_RULES_V2,
+    CONF_PRESENCE_USER_MACS,
+    CONF_PRESENCE_USER_NAME,
+    CONF_PRESENCE_USERS,
+    CONF_TRACKED_CLIENTS,
+    CONF_USER_AWAY_GRACE_PERIOD,
     CONF_VDOM,
     CONF_VERIFY_SSL,
+    RULE_MATCH_ANY,
+    RULE_PRESENCE_AWAY,
+    STATUS_DISABLE,
 )
 from custom_components.fortigate_policy.presence_users import PresenceUser
 from custom_components.fortigate_policy.switch import FortiGatePolicySwitch
@@ -240,6 +261,122 @@ class TestWifiTrackerOptions(unittest.TestCase):
 
 
 class TestPolicyOptions(unittest.TestCase):
+    @staticmethod
+    def _options_flow(entry: SimpleNamespace) -> FortiGatePolicyOptionsFlow:
+        flow = FortiGatePolicyOptionsFlow()
+        flow.hass = SimpleNamespace(
+            config_entries=SimpleNamespace(
+                async_get_known_entry=lambda _entry_id: entry
+            )
+        )
+        flow.handler = "entry-1"
+        return flow
+
+    def test_configuration_hub_summarizes_setup_without_sensitive_data(self) -> None:
+        summary = _options_hub_summary(
+            {
+                CONF_POLICIES: [
+                    {"policy_id": "61", "policy_name": "Family access"},
+                    {"policy_id": "72", "policy_name": "Guest access"},
+                ],
+                CONF_API_TOKEN: "must-not-appear",
+            },
+            {
+                CONF_TRACKED_CLIENTS: {MAC: {}, "11:22:33:44:55:66": {}},
+                CONF_PRESENCE_USERS: {"person-1": {}},
+                CONF_POLICY_RULES_V2: {"rule-1": {}, "rule-2": {}},
+                CONF_POLICY_AUTOMATION_ENABLED: True,
+                CONF_POLICY_AUTOMATION_DRY_RUN: True,
+            },
+        )
+
+        self.assertEqual(
+            {
+                "tracked": "2",
+                "users": "1",
+                "rules": "2",
+                "policies": "2",
+                "automation": "Dry run",
+            },
+            summary,
+        )
+        self.assertNotIn("must-not-appear", str(summary))
+
+    def test_configuration_hub_reports_disabled_enforcement(self) -> None:
+        self.assertEqual(
+            "Off",
+            _options_hub_summary(
+                {CONF_POLICIES: []},
+                {CONF_POLICY_AUTOMATION_ENABLED: False},
+            )["automation"],
+        )
+
+    def test_configuration_hub_uses_task_centered_menu(self) -> None:
+        flow = self._options_flow(SimpleNamespace(data={CONF_POLICIES: []}, options={}))
+
+        result = asyncio.run(flow.async_step_init())
+
+        self.assertEqual(
+            [
+                "guided_parental_control",
+                "people_devices",
+                "parental_controls",
+                "firewall_policies",
+                "advanced_settings",
+            ],
+            result["menu_options"],
+        )
+
+    def test_guided_setup_saves_person_and_rule_only_after_confirmation(self) -> None:
+        entry = SimpleNamespace(
+            data={CONF_POLICIES: [{"policy_id": "61", "policy_name": "Family access"}]},
+            options={CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}}},
+        )
+        flow = self._options_flow(entry)
+
+        person_result = asyncio.run(flow.async_step_guided_parental_control())
+        self.assertEqual("guided_person", person_result["step_id"])
+        policy_result = asyncio.run(
+            flow.async_step_guided_person(
+                {
+                    CONF_PRESENCE_USER_NAME: "Example person",
+                    CONF_PRESENCE_USER_MACS: [MAC],
+                    CONF_USER_AWAY_GRACE_PERIOD: 180,
+                }
+            )
+        )
+        self.assertEqual("guided_policy", policy_result["step_id"])
+        preview_result = asyncio.run(
+            flow.async_step_guided_policy(
+                {
+                    CONF_POLICY_RULE_NAME: "Away rule",
+                    CONF_POLICY_RULE_PRESENCE: RULE_PRESENCE_AWAY,
+                    CONF_POLICY_RULE_ACTION: STATUS_DISABLE,
+                    CONF_POLICY_RULE_POLICIES: ["61"],
+                    CONF_POLICY_RULE_PRIORITY: 50,
+                    CONF_POLICY_RULE_SCHEDULE: "",
+                }
+            )
+        )
+        self.assertEqual("guided_policy_rule_preview", preview_result["step_id"])
+        self.assertNotIn(CONF_PRESENCE_USERS, entry.options)
+
+        result = asyncio.run(
+            flow.async_step_guided_policy_rule_preview({"confirm": True})
+        )
+        saved_users = result["data"][CONF_PRESENCE_USERS]
+        saved_rules = result["data"][CONF_POLICY_RULES_V2]
+        self.assertEqual(1, len(saved_users))
+        self.assertEqual(1, len(saved_rules))
+        user_id, user = next(iter(saved_users.items()))
+        rule = next(iter(saved_rules.values()))
+        self.assertEqual("Example person", user[CONF_PRESENCE_USER_NAME])
+        self.assertEqual([MAC], user[CONF_PRESENCE_USER_MACS])
+        self.assertEqual([user_id], rule[CONF_POLICY_RULE_USERS])
+        self.assertEqual(RULE_MATCH_ANY, rule[CONF_POLICY_RULE_MATCH])
+        self.assertEqual(STATUS_DISABLE, rule[CONF_POLICY_RULE_ACTION])
+        self.assertEqual(["61"], rule[CONF_POLICY_RULE_POLICIES])
+
     def test_policy_form_defaults_to_all_configured_ids(self) -> None:
         schema = _policy_options_schema(
             {

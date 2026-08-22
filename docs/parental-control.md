@@ -24,18 +24,22 @@ In Home Assistant, confirm these entities work independently before creating an 
 
 Use the actual entity IDs from **Settings > Devices & services > Entities**.
 
-## Built-in user policy rules
+## Built-in parental-control rules
 
-Open **Settings > Devices & services > FortiAP Presence Tracker > Configure > Users and policy rules**. Add a user, assign one or more tracked devices, then choose any combination of:
+Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**. The first page summarizes the configured devices, people, rules, policies, and enforcement mode.
 
-- policies to enable while home
-- policies to disable while home
-- policies to enable while away
-- policies to disable while away
+For a new person, choose **Guided parental-control setup**:
 
-Save and repeat for other people. Each user has an aggregate device tracker and presence binary sensor and can control one policy or several. Policy fields may be left empty when the aggregate entities are only needed for Home Assistant automations.
+1. Name the person and select all of their tracked devices.
+2. Choose whether the rule applies while home or away.
+3. Choose the enable or disable action and the verified firewall policies.
+4. Review the exact rule and confirm it.
 
-One assigned device at home makes the user home immediately. The user becomes away only when every assigned device is away after its normal grace period. If none is home but any device is unknown, the user is unavailable. Rules are reconciled after valid Wi-Fi or policy updates; disable wins a conflict between users, and a failed Wi-Fi poll cannot act like a departure.
+The person is saved only with the confirmed rule. If trackers or policies have not been configured yet, guided setup opens the missing prerequisite screen first.
+
+Use **People and devices** to edit people or trackers. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
+
+Rules are reconciled only after valid Wi-Fi or policy updates. A failed Wi-Fi poll cannot act like a departure, and disable wins a conflict between equal-priority rules.
 
 The examples below use normal Home Assistant automations as an alternative when conditions beyond tracker state are needed.
 
@@ -109,7 +113,7 @@ For a policy managed by a built-in presence rule, a manual switch change is reco
 
 A Home Assistant presence automation runs only when its binary sensor changes state. With that approach, a manual policy change remains until the next matching presence transition.
 
-For a longer override, disable the relevant Home Assistant automation rather than changing the FortiGate policy definition.
+For a built-in rule, use the policy's **Policy automation override** select. It provides Automatic, Force enabled, Force disabled, and Paused. Overrides use the configured default duration and return to Automatic after Home Assistant restarts.
 
 ## Failure behavior
 
@@ -137,9 +141,9 @@ Wi-Fi association is a useful automation signal, not an identity or security bou
 FortiOS permission profiles commonly grant access to a configuration area rather than one policy ID. Restrict the REST administrator by trusted host, use least privilege, and keep the FortiGate management interface private.
 ## Recommended rule workflow
 
-1. Add selected Wi-Fi devices as trackers.
-2. Combine each person's phone, watch, and tablet under **Presence users**.
-3. Open **Policy automation rules** and create the condition for each policy.
+1. Add selected Wi-Fi devices under **People and devices**.
+2. Combine each person's phone, watch, and tablet under **Manage people**.
+3. Open **Parental-control rules** and create the condition for each policy.
 4. Review the generated summary before confirming it.
 5. Start with **Dry run** enabled and inspect the policy decision sensors.
 6. Disable dry run when the decisions match the intended behavior.

@@ -121,6 +121,29 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 TOKEN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 
+def _options_hub_summary(
+    data: dict[str, Any], options: dict[str, Any]
+) -> dict[str, str]:
+    """Return bounded, non-sensitive counts for the configuration hub."""
+    tracked = options.get(CONF_TRACKED_CLIENTS, {})
+    users = options.get(CONF_PRESENCE_USERS, {})
+    rules = options.get(CONF_POLICY_RULES_V2, {})
+    automation_enabled = options.get(
+        CONF_POLICY_AUTOMATION_ENABLED, DEFAULT_POLICY_AUTOMATION_ENABLED
+    )
+    dry_run = options.get(
+        CONF_POLICY_AUTOMATION_DRY_RUN, DEFAULT_POLICY_AUTOMATION_DRY_RUN
+    )
+    automation = "Off" if not automation_enabled else "Dry run" if dry_run else "Active"
+    return {
+        "tracked": str(len(tracked) if isinstance(tracked, dict) else 0),
+        "users": str(len(users) if isinstance(users, dict) else 0),
+        "rules": str(len(rules) if isinstance(rules, dict) else 0),
+        "policies": str(len(configured_policies(data))),
+        "automation": automation,
+    }
+
+
 def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the UI form for all connection-critical settings."""
     defaults = defaults or {}
@@ -482,30 +505,240 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self._presence_user_id: str | None = None
         self._policy_rule_id: str | None = None
         self._pending_policy_rule: dict[str, Any] | None = None
+        self._pending_guided_user: dict[str, Any] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show clear entry points for trackers and advanced settings."""
+        """Show a person-centered configuration hub with a status summary."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "guided_parental_control",
+                "people_devices",
+                "parental_controls",
+                "firewall_policies",
+                "advanced_settings",
+            ],
+            description_placeholders=_options_hub_summary(
+                dict(self.config_entry.data), dict(self.config_entry.options)
+            ),
+        )
+
+    async def async_step_people_devices(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Group tracker and person management in one focused submenu."""
         tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
         tracked_count = len(tracked) if isinstance(tracked, dict) else 0
-        menu_options = ["firewall_policies", "wifi_clients"]
-        if tracked_count:
-            menu_options.append("presence_users")
         users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        user_count = len(users) if isinstance(users, dict) else 0
+        menu = ["wifi_clients"]
+        if tracked_count:
+            menu.extend(["presence_users", "remove_wifi_trackers"])
+        return self.async_show_menu(
+            step_id="people_devices",
+            menu_options=menu,
+            description_placeholders={
+                "tracked": str(tracked_count),
+                "users": str(user_count),
+            },
+        )
+
+    async def async_step_parental_controls(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Group guided setup and rule management away from device discovery."""
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
+        menu = ["guided_parental_control"]
         if (
             isinstance(users, dict)
             and users
             and configured_policies(self.config_entry.data)
         ):
-            menu_options.append("policy_rules")
-        if tracked_count:
-            menu_options.append("remove_wifi_trackers")
-        menu_options.append("wifi_settings")
+            menu.append("policy_rules")
         return self.async_show_menu(
-            step_id="init",
-            menu_options=menu_options,
-            description_placeholders={"tracked": str(tracked_count)},
+            step_id="parental_controls",
+            menu_options=menu,
+            description_placeholders={
+                "users": str(len(users) if isinstance(users, dict) else 0),
+                "rules": str(len(rules) if isinstance(rules, dict) else 0),
+            },
+        )
+
+    async def async_step_advanced_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Keep polling and automation safety controls out of the main path."""
+        return self.async_show_menu(
+            step_id="advanced_settings", menu_options=["wifi_settings"]
+        )
+
+    async def async_step_guided_parental_control(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Start the shortest safe path to a person and one policy rule."""
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        if not isinstance(tracked, dict) or not tracked:
+            return await self.async_step_wifi_clients()
+        if not configured_policies(self.config_entry.data):
+            return await self.async_step_firewall_policies()
+        self._presence_user_id = self._presence_user_id or uuid4().hex
+        return await self.async_step_guided_person(user_input)
+
+    async def async_step_guided_person(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect the stable person identity and all of their Wi-Fi devices."""
+        if self._presence_user_id is None:
+            return await self.async_step_guided_parental_control()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = str(user_input.get(CONF_PRESENCE_USER_NAME, "")).strip()
+            selected_macs = {
+                normalized
+                for mac in user_input.get(CONF_PRESENCE_USER_MACS, [])
+                if (normalized := normalize_mac(mac)) is not None
+            }
+            existing = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+            assigned = {
+                normalized
+                for raw_user in (
+                    existing.values() if isinstance(existing, dict) else []
+                )
+                if isinstance(raw_user, dict)
+                for mac in raw_user.get(CONF_PRESENCE_USER_MACS, [])
+                if (normalized := normalize_mac(mac)) is not None
+            }
+            if not name:
+                errors[CONF_PRESENCE_USER_NAME] = "required"
+            elif not selected_macs:
+                errors[CONF_PRESENCE_USER_MACS] = "select_user_device"
+            elif selected_macs & assigned:
+                errors[CONF_PRESENCE_USER_MACS] = "device_already_assigned"
+            else:
+                self._pending_guided_user = {
+                    CONF_PRESENCE_USER_NAME: name,
+                    CONF_PRESENCE_USER_MACS: sorted(selected_macs),
+                    CONF_USER_AWAY_GRACE_PERIOD: int(
+                        user_input.get(
+                            CONF_USER_AWAY_GRACE_PERIOD,
+                            DEFAULT_USER_AWAY_GRACE_PERIOD,
+                        )
+                    ),
+                }
+                return await self.async_step_guided_policy()
+        return self.async_show_form(
+            step_id="guided_person",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PRESENCE_USER_NAME): TextSelector(
+                        TextSelectorConfig()
+                    ),
+                    vol.Required(CONF_PRESENCE_USER_MACS): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._tracker_options(), multiple=True
+                        )
+                    ),
+                    vol.Required(
+                        CONF_USER_AWAY_GRACE_PERIOD,
+                        default=self.config_entry.options.get(
+                            CONF_WIFI_AWAY_GRACE_PERIOD,
+                            DEFAULT_USER_AWAY_GRACE_PERIOD,
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=MIN_USER_AWAY_GRACE_PERIOD,
+                            max=MAX_USER_AWAY_GRACE_PERIOD,
+                            step=15,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_guided_policy(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect policy behavior before using the normal verified preview."""
+        if self._presence_user_id is None or self._pending_guided_user is None:
+            return await self.async_step_guided_parental_control()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not str(user_input.get(CONF_POLICY_RULE_NAME, "")).strip():
+                errors[CONF_POLICY_RULE_NAME] = "required"
+            elif not user_input.get(CONF_POLICY_RULE_POLICIES):
+                errors[CONF_POLICY_RULE_POLICIES] = "select_rule_policy"
+            else:
+                self._policy_rule_id = self._policy_rule_id or uuid4().hex
+                self._pending_policy_rule = {
+                    CONF_POLICY_RULE_NAME: str(
+                        user_input[CONF_POLICY_RULE_NAME]
+                    ).strip(),
+                    CONF_POLICY_RULE_USERS: [self._presence_user_id],
+                    CONF_POLICY_RULE_MATCH: RULE_MATCH_ANY,
+                    CONF_POLICY_RULE_PRESENCE: user_input[CONF_POLICY_RULE_PRESENCE],
+                    CONF_POLICY_RULE_ACTION: user_input[CONF_POLICY_RULE_ACTION],
+                    CONF_POLICY_RULE_POLICIES: list(
+                        user_input[CONF_POLICY_RULE_POLICIES]
+                    ),
+                    CONF_POLICY_RULE_PRIORITY: int(
+                        user_input[CONF_POLICY_RULE_PRIORITY]
+                    ),
+                    CONF_POLICY_RULE_SCHEDULE: str(
+                        user_input.get(CONF_POLICY_RULE_SCHEDULE, "")
+                    ),
+                }
+                return await self.async_step_guided_policy_rule_preview()
+        person = self._pending_guided_user[CONF_PRESENCE_USER_NAME]
+        policy_options = [
+            {
+                "value": policy.policy_id,
+                "label": f"{policy.expected_name or 'Policy'} ({policy.policy_id})",
+            }
+            for policy in configured_policies(self.config_entry.data)
+        ]
+        return self.async_show_form(
+            step_id="guided_policy",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_POLICY_RULE_NAME, default=f"{person} policy"
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Required(
+                        CONF_POLICY_RULE_PRESENCE, default=RULE_PRESENCE_AWAY
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[RULE_PRESENCE_HOME, RULE_PRESENCE_AWAY],
+                            translation_key="policy_rule_presence",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POLICY_RULE_ACTION, default=STATUS_DISABLE
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[STATUS_ENABLE, STATUS_DISABLE],
+                            translation_key="policy_rule_action",
+                        )
+                    ),
+                    vol.Required(CONF_POLICY_RULE_POLICIES): SelectSelector(
+                        SelectSelectorConfig(options=policy_options, multiple=True)
+                    ),
+                    vol.Required(CONF_POLICY_RULE_PRIORITY, default=50): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                        )
+                    ),
+                    vol.Optional(CONF_POLICY_RULE_SCHEDULE): EntitySelector(
+                        EntitySelectorConfig(domain="schedule")
+                    ),
+                }
+            ),
+            errors=errors,
         )
 
     async def async_step_remove_wifi_trackers(
@@ -1043,6 +1276,20 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Require an explicit confirmation after showing the exact rule effect."""
+        return await self._async_policy_rule_preview(user_input, "policy_rule_preview")
+
+    async def async_step_guided_policy_rule_preview(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm the final step of the guided person-and-rule workflow."""
+        return await self._async_policy_rule_preview(
+            user_input, "guided_policy_rule_preview"
+        )
+
+    async def _async_policy_rule_preview(
+        self, user_input: dict[str, Any] | None, step_id: str
+    ) -> ConfigFlowResult:
+        """Validate and persist a normal or guided rule after confirmation."""
         if self._policy_rule_id is None or self._pending_policy_rule is None:
             return await self.async_step_policy_rules()
         errors: dict[str, str] = {}
@@ -1050,7 +1297,22 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
             updated = dict(rules) if isinstance(rules, dict) else {}
             updated[self._policy_rule_id] = self._pending_policy_rule
+            options = dict(self.config_entry.options)
             user_ids = set(self._user_ids())
+            if self._pending_guided_user is not None:
+                users = options.get(CONF_PRESENCE_USERS, {})
+                updated_users = dict(users) if isinstance(users, dict) else {}
+                updated_users[self._presence_user_id] = self._pending_guided_user
+                updated_users = serialize_presence_users(
+                    updated_users,
+                    set(self._selected_from_options()),
+                    {
+                        policy.policy_id
+                        for policy in configured_policies(self.config_entry.data)
+                    },
+                )
+                options[CONF_PRESENCE_USERS] = updated_users
+                user_ids = set(updated_users)
             policy_ids = {
                 policy.policy_id
                 for policy in configured_policies(self.config_entry.data)
@@ -1058,7 +1320,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             normalized = serialize_policy_rules(updated, user_ids, policy_ids)
             return self.async_create_entry(
                 data={
-                    **dict(self.config_entry.options),
+                    **options,
                     CONF_POLICY_RULES_V2: normalized,
                 }
             )
@@ -1070,12 +1332,23 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             for option in self._user_options()
             if option["value"] in pending[CONF_POLICY_RULE_USERS]
         )
+        if self._pending_guided_user is not None:
+            users = str(self._pending_guided_user[CONF_PRESENCE_USER_NAME])
         policies = ", ".join(pending[CONF_POLICY_RULE_POLICIES])
         schedule = pending.get(CONF_POLICY_RULE_SCHEDULE) or "Always"
-        current_states = "Waiting for a valid Wi-Fi update"
+        current_states = (
+            "New user will be evaluated after save"
+            if self._pending_guided_user is not None
+            else "Waiting for a valid Wi-Fi update"
+        )
         runtime = getattr(self.config_entry, "runtime_data", None)
         wifi = getattr(runtime, "wifi_coordinator", None)
-        if wifi is not None and wifi.last_update_success and wifi.data is not None:
+        if (
+            self._pending_guided_user is None
+            and wifi is not None
+            and wifi.last_update_success
+            and wifi.data is not None
+        ):
             configured_users = configured_presence_users(
                 self.config_entry.options,
                 set(self._selected_from_options()),
@@ -1121,7 +1394,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 "Possible equal-priority conflict; disable will win if both match"
             )
         return self.async_show_form(
-            step_id="policy_rule_preview",
+            step_id=step_id,
             data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
             description_placeholders={
                 "name": pending[CONF_POLICY_RULE_NAME],

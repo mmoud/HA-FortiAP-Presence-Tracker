@@ -1,5 +1,5 @@
 const DOMAIN = "fortigate_policy";
-const ICON_BASE = "/fortiap_presence_static/icons";
+const ICON_BASE = "/fortiap_presence_static/icons-color";
 
 const escapeHtml = (value) =>
   String(value ?? "")

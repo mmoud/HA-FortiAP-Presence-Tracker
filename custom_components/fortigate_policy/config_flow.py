@@ -63,6 +63,7 @@ from .const import (
 from .policy_config import (
     PolicyDefinition,
     configured_policies,
+    fortigate_entry_title,
     parse_policy_ids,
     serialize_policies,
 )
@@ -217,12 +218,7 @@ async def _async_validate_input(
     for policy_id in parse_policy_ids(data[CONF_POLICY_IDS]):
         policy = await _api_for_policy(hass, data, policy_id, "").async_get_policy()
         policies.append(PolicyDefinition(policy.policy_id, policy.name))
-    title = (
-        policies[0].expected_name or f"FortiGate Policy {policies[0].policy_id}"
-        if len(policies) == 1
-        else f"FortiGate ({len(policies)} policies)"
-    )
-    return tuple(policies), title
+    return tuple(policies), fortigate_entry_title(data)
 
 
 async def _async_validate_entry_data(hass: HomeAssistant, data: dict[str, Any]) -> None:
@@ -258,7 +254,7 @@ def _error_key(err: Exception) -> str:
 class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure the integration entirely through Home Assistant's UI."""
 
-    VERSION = 2
+    VERSION = 3
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -315,6 +311,9 @@ class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
                 updated_data = _entry_data(data, policies)
                 if legacy_primary := entry.data.get(CONF_LEGACY_PRIMARY_POLICY_ID):
                     updated_data[CONF_LEGACY_PRIMARY_POLICY_ID] = legacy_primary
+                self.hass.config_entries.async_update_entry(
+                    entry, title=fortigate_entry_title(updated_data)
+                )
                 return self.async_update_reload_and_abort(
                     entry, data_updates=updated_data
                 )

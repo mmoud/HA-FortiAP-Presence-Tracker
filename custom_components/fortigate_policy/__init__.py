@@ -29,7 +29,7 @@ from .const import (
     DEFAULT_WIFI_TRACKING_ENABLED,
 )
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
-from .policy_config import configured_policies, migrate_v1_data
+from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
 from .wifi import normalize_mac
 
 PLATFORMS: list[Platform] = [
@@ -128,12 +128,18 @@ async def async_setup_entry(
 async def async_migrate_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
-    """Migrate version-1 single-policy entries without changing entity identity."""
-    if entry.version > 2:
+    """Migrate entries without changing entity identity."""
+    if entry.version > 3:
         return False
+    data = dict(entry.data)
     if entry.version == 1:
+        data = migrate_v1_data(data)
+    if entry.version < 3:
         hass.config_entries.async_update_entry(
-            entry, data=migrate_v1_data(entry.data), version=2
+            entry,
+            data=data,
+            title=fortigate_entry_title(data),
+            version=3,
         )
     return True
 

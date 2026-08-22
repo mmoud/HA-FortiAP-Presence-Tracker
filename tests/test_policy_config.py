@@ -18,12 +18,27 @@ policy_config = __import__(f"{PACKAGE}.policy_config", fromlist=["*"])
 
 PolicyDefinition = policy_config.PolicyDefinition
 configured_policies = policy_config.configured_policies
+fortigate_entry_title = policy_config.fortigate_entry_title
 migrate_v1_data = policy_config.migrate_v1_data
 parse_policy_ids = policy_config.parse_policy_ids
 serialize_policies = policy_config.serialize_policies
 
 
 class TestPolicyConfiguration(unittest.TestCase):
+    def test_entry_title_describes_appliance_not_policy(self) -> None:
+        self.assertEqual(
+            "FortiGate fortigate.example.test",
+            fortigate_entry_title(
+                {"host": "fortigate.example.test", const.CONF_VDOM: "root"}
+            ),
+        )
+        self.assertEqual(
+            "FortiGate fortigate.example.test (tenant-a)",
+            fortigate_entry_title(
+                {"host": "fortigate.example.test", const.CONF_VDOM: "tenant-a"}
+            ),
+        )
+
     def test_policy_id_parser_normalizes_and_deduplicates(self) -> None:
         self.assertEqual(("61", "72", "83"), parse_policy_ids("61, 72,61, 83"))
         for invalid in ("", "61,", "61,abc", "61;72"):

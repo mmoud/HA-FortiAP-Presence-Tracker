@@ -461,7 +461,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             step_id="remove_wifi_trackers",
             data_schema=vol.Schema(
                 {
-                    vol.Required(self._TRACKERS_TO_REMOVE): SelectSelector(
+                    vol.Optional(self._TRACKERS_TO_REMOVE, default=[]): SelectSelector(
                         SelectSelectorConfig(options=options, multiple=True)
                     )
                 }

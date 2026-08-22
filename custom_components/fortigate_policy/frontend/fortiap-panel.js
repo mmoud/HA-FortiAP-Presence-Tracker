@@ -355,7 +355,9 @@ class FortiApPresencePanel extends HTMLElement {
       settings: this._settings(),
     };
     this.shadowRoot.innerHTML = `${this._styles()}<div class="shell"><header class="top"><div><div class="eyebrow">FortiAP Presence Tracker ${escapeHtml(this._draft.version)}</div><h1>Wireless presence and policy control</h1><div class="muted">${escapeHtml(this._draft.title)} · ${escapeHtml(this._draft.connection.vdom)} VDOM</div></div><div class="row">${this._entries.length > 1 ? `<select data-action="entry-select">${this._entries.map((entry) => `<option value="${escapeHtml(entry.entry_id)}" ${entry.entry_id === this._draft.entry_id ? "selected" : ""}>${escapeHtml(entry.title)}</option>`).join("")}</select>` : ""}<button class="btn" data-action="reload">Refresh</button></div></header>${this._error ? `<div class="notice error">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice">${escapeHtml(this._notice)}</div>` : ""}<nav class="tabs">${[["overview","Overview"],["devices","People & devices"],["policies","Policies & rules"],["settings","Settings"]].map(([key,label]) => `<button class="tab ${this._tab === key ? "active" : ""}" data-action="tab" data-tab="${key}">${label}</button>`).join("")}</nav>${views[this._tab]}</div><div class="savebar"><div class="save-inner"><div><strong>Review changes before saving</strong><div class="muted">Policy IDs are verified and the integration reloads atomically.</div></div><button class="btn primary" data-action="save" ${this._saving ? "disabled" : ""}>${this._saving ? "Saving…" : "Save changes"}</button></div></div>`;
-    this.shadowRoot.onclick = (event) => this._handleClick(event);
+    this.shadowRoot.querySelectorAll("[data-action]").forEach((element) => {
+      element.onclick = (event) => this._handleClick(event);
+    });
     const entrySelect = this.shadowRoot.querySelector('[data-action="entry-select"]');
     if (entrySelect) entrySelect.onchange = () => void this._load(entrySelect.value);
   }

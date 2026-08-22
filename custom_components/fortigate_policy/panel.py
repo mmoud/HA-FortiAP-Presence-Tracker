@@ -83,8 +83,8 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-FRONTEND_FILE = "fortiap-panel.js"
-PANEL_VERSION = "3.2.6"
+PANEL_VERSION = "3.2.7"
+FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
 
 
 def _entry(hass: HomeAssistant, entry_id: str):
@@ -641,7 +641,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
         webcomponent_name="fortiap-presence-panel",
         sidebar_title="FortiAP Presence",
         sidebar_icon="mdi:wifi-marker",
-        module_url=f"{STATIC_URL}/{FRONTEND_FILE}?v={PANEL_VERSION}",
+        module_url=f"{STATIC_URL}/{FRONTEND_FILE}",
         embed_iframe=True,
         require_admin=True,
         config_panel_domain=DOMAIN,

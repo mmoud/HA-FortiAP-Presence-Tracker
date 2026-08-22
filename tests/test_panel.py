@@ -53,7 +53,7 @@ FRONTEND = (
     / "custom_components"
     / "fortigate_policy"
     / "frontend"
-    / "fortiap-panel.js"
+    / f"fortiap-panel-{PANEL_VERSION}.js"
 )
 
 
@@ -168,13 +168,14 @@ class TestPanelFrontend(unittest.TestCase):
         )
 
         self.assertEqual(manifest["version"], PANEL_VERSION)
+        self.assertEqual(FRONTEND.name, f"fortiap-panel-{PANEL_VERSION}.js")
 
     def test_dashboard_uses_bundled_icons_and_semantic_metric_tones(
         self,
     ) -> None:
         source = FRONTEND.read_text(encoding="utf-8")
 
-        self.assertIn('ICON_BASE = "/fortiap_presence_static/icons"', source)
+        self.assertIn('ICON_BASE = "/fortiap_presence_static/icons-color"', source)
         self.assertIn('"view-dashboard-outline"', source)
         self.assertIn(".svg?v=${iconVersion}", source)
         self.assertIn("metric-card ${escapeHtml(tone)}", source)
@@ -186,7 +187,7 @@ class TestPanelFrontend(unittest.TestCase):
             "shield-check",
             "view-dashboard-outline",
         ):
-            self.assertTrue((FRONTEND.parent / "icons" / f"{icon}.svg").is_file())
+            self.assertTrue((FRONTEND.parent / "icons-color" / f"{icon}.svg").is_file())
 
     def test_people_creation_precedes_large_discovery_catalog(self) -> None:
         source = FRONTEND.read_text(encoding="utf-8")

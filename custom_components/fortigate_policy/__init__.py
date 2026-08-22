@@ -85,7 +85,11 @@ type FortiGatePolicyConfigEntry = ConfigEntry[FortiGateRuntimeData]
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Register the duration-aware manual override action."""
+    """Register the management panel and manual override action."""
+
+    from .panel import async_register_panel
+
+    await async_register_panel(hass)
 
     async def async_set_policy_override(call: ServiceCall) -> None:
         entry_id = call.data["config_entry_id"]

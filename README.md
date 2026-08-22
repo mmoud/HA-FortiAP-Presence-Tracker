@@ -44,7 +44,7 @@ Keep the FortiGate management interface on a private network. Do not expose it t
 
 The setup form requires the FortiGate host, HTTPS port, VDOM, API token, and TLS verification setting. Firewall policy IDs are optional. Leave the field empty when the integration will only create presence trackers and people. Enter one ID or a comma-separated list such as `61, 72, 83` only when Home Assistant should create switches for those existing policies or use them in built-in parental-control rules.
 
-Each supplied ID is the numeric ID of an existing FortiGate firewall policy. It is read before the entry is saved, its returned name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. The integration changes only the policy's enabled/disabled status. Add, remove, or clear IDs later with **Configure > Firewall policies**; clearing them does not remove Wi-Fi trackers or people.
+Each supplied ID is the numeric ID of an existing FortiGate firewall policy. It is read before the entry is saved, its returned name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. The integration changes only the policy's enabled/disabled status. Add, remove, or clear IDs later on **Policies & rules**; clearing them does not remove Wi-Fi trackers or people.
 
 The switch uses these endpoints:
 
@@ -71,19 +71,22 @@ TLS certificate verification is enabled by default. Disable it only when the For
 
 ## Wi-Fi presence tracking
 
-Open **Settings > Devices & services > FortiAP Presence Tracker**, find the configured entry, and select **Configure**. Home Assistant requires custom integrations to enter configuration through this button. The integration then opens a status hub showing the number of tracked devices, people, rules, and policies, plus the current enforcement mode.
+Open **Settings > Devices & services > FortiAP Presence Tracker** and select **Configure**. Version 3 provides a full-width management page instead of placing normal administration in a sequence of small dialogs. The same page is also available from **FortiAP Presence** in the Home Assistant sidebar.
 
-The hub is organized by task:
+The page is organized into four wide views:
 
-- **Guided policy-based parental control** creates a person and one firewall-policy rule in three reviewed steps: person and devices, policy behavior, then confirmation. Because this workflow automates a firewall policy, it requires at least one configured policy. The UI links to presence-only setup when policy control is not wanted.
-- **People and devices** displays every person and assigned device directly on its landing page, discovers clients, manages tracked devices, limits individual trackers to selected SSIDs, and combines a person's phone, watch, tablet, or other devices.
-- **Parental-control rules** creates or edits prioritized firewall actions.
-- **Firewall policies** adds or removes optional verified policy switches.
-- **Advanced settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
+- **Overview** shows connection health, configuration counts, safety behavior, and every person/device assignment.
+- **People & devices** shows actual tracker state, current SSID and FortiAP, friendly names, per-tracker SSID scopes, discovery results, and multi-device people.
+- **Policies & rules** manages optional verified firewall policy IDs and presence rules together.
+- **Settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
 
-Disabling Wi-Fi tracking is reversible and retains the selected devices. Use **Remove Wi-Fi trackers** when the entities should be deleted from Home Assistant.
+Changes remain local to the page until **Save changes** is selected. The backend then validates the complete configuration, re-reads every configured policy using its saved name guard, updates the config entry atomically, and reloads the integration. Invalid input does not partially modify the integration.
 
-Use **Firewall policies** in the same Configure menu to add or remove policy switches with a comma-separated list of policy IDs. The integration verifies every policy before saving the change.
+The management page is bundled with the HACS integration; no separate frontend repository, card, add-on, or YAML resource is required. It is restricted to Home Assistant administrators. The API token and authorization header are never sent to the panel.
+
+Disabling Wi-Fi tracking is reversible and retains the selected devices. Remove a row from **People & devices** and save when its tracker and presence entities should be deleted from Home Assistant.
+
+Use **Policies & rules** to add or remove policy IDs. The integration verifies every policy and its existing name guard before saving the change.
 
 On the tracker screen, enable Wi-Fi presence tracking, select one or more devices, and save. Only newly selected devices ask for a friendly name; existing names are preserved. Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. Each selected MAC creates two entities:
 
@@ -92,7 +95,7 @@ On the tracker screen, enable Wi-Fi presence tracking, select one or more device
 
 Both entities use the same coordinator result and away grace period. The binary sensor does not add another FortiGate request.
 
-Under **People and devices > Manage people**, assign a phone, watch, tablet, or other selected trackers to one person. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The person is home as soon as any assigned device is home. The person becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the person is unavailable rather than away.
+On **People & devices**, assign a phone, watch, tablet, or other selected trackers to one person. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The person is home as soon as any assigned device is home. The person becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the person is unavailable rather than away.
 
 The **People and devices** landing page lists all people and their assignments without opening an edit form. If every tracked device is already assigned, guided parental-control setup asks which existing person the new rule should follow instead of requiring another tracker.
 
@@ -108,7 +111,7 @@ FortiOS response fields vary between releases. The integration normalizes known 
 
 The MAC address is the tracker's stable identity. Colon-separated, hyphenated, and compact MAC formats are normalized to the same value. Renaming a tracker does not change its unique ID.
 
-By default, an association on any FortiGate-managed SSID means home. To scope a device, open **People and devices > Limit trackers to Wi-Fi networks**, choose the tracker, and select one or more exact SSID names. A device seen on another SSID is treated as absent and follows the normal away grace period. SSID matching is case-sensitive. API failures still make the tracker unavailable; they are never treated as an SSID mismatch.
+By default, an association on any FortiGate-managed SSID means home. To scope a device, enter one or more comma-separated SSIDs in its **Allowed SSIDs** field on **People & devices**. A device seen on another SSID is treated as absent and follows the normal away grace period. SSID matching is case-sensitive. API failures still make the tracker unavailable; they are never treated as an SSID mismatch.
 
 ### Presence rules
 
@@ -127,9 +130,9 @@ Apple devices may use a private MAC address. Track the address shown by FortiGat
 
 ## Parental control
 
-The integration can apply policy states directly from presence without separate Home Assistant automations. For a new person, open **Configure > Guided parental-control setup**. Select all of the person's tracked devices, choose the verified policies and behavior, then review the complete rule before confirming it.
+The integration can apply policy states directly from presence without separate Home Assistant automations. Add the person's devices and assignments on **People & devices**, then configure the verified policies and behavior on **Policies & rules**. Review the complete page before saving.
 
-For more complex installations, use **People and devices** to maintain people and **Parental-control rules** to create rules involving multiple people, priorities, or schedules.
+For more complex installations, use **People & devices** to maintain people and **Policies & rules** to create rules involving multiple people, priorities, or schedules.
 
 For example, a user with an iPhone and Apple Watch remains home while either device is connected. Another user can independently disable policies 1 and 2 while away. Policy fields are optional, so aggregate user trackers can also be used only in Home Assistant automations.
 
@@ -137,7 +140,7 @@ Rules are evaluated from aggregate current state rather than only on transitions
 
 ### Policy automation rules
 
-For installations with several users, use **Configure > Parental-control rules > Manage existing rules**. A rule contains:
+For installations with several users, use **Policies & rules**. A rule contains:
 
 - one or more presence users
 - **Any user** or **All users** matching

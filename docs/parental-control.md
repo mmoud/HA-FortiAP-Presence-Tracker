@@ -26,20 +26,20 @@ Use the actual entity IDs from **Settings > Devices & services > Entities**.
 
 ## Built-in parental-control rules
 
-Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**. The first page summarizes the configured devices, people, rules, policies, and enforcement mode.
+Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**. This opens the full-page management panel. Its Overview shows configured devices, people, rules, policies, current health, and enforcement behavior together.
 
-For a new policy-controlled person, choose **Guided policy-based parental control**. This wizard intentionally requires a configured firewall policy because its result is an automatic rule that enables or disables that policy. A policy ID identifies an existing FortiGate rule; the integration changes only its status. For presence entities without policy automation, use **People and devices > Manage people** instead.
+For a new policy-controlled person, first add or discover their devices on **People & devices**, then add the person and assign those devices in the same view. Add existing FortiGate policy IDs and the person's rule under **Policies & rules**. A policy ID identifies an existing FortiGate rule; the integration changes only its status. Policy configuration remains optional for presence-only use.
 
 1. Name the person and select all of their tracked devices.
 2. Choose whether the rule applies while home or away.
 3. Choose the enable or disable action and the verified firewall policies.
 4. Review the exact rule and confirm it.
 
-The person is saved only with the confirmed rule. If trackers or policies have not been configured yet, guided setup opens the missing prerequisite screen first.
+The full configuration is validated only when **Save changes** is selected. If any tracker, person, policy, or rule is invalid, nothing is partially saved.
 
-The **People and devices** page itself shows a read-only list of all configured people and their phones, watches, tablets, or other trackers. Use **Manage people** only when assignments need to change. If every tracker is already assigned, guided setup asks which existing person the new rule should follow. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
+The **People & devices** page shows all configured people and their phones, watches, tablets, or other trackers, with assignments editable in place. Use **Policies & rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
 
-If a device should count as home only on selected networks, use **People and devices > Limit trackers to Wi-Fi networks**. An empty selection accepts every FortiGate-managed SSID. A non-matching SSID starts the same conservative away grace period as a missing association; a failed FortiGate request remains unavailable and cannot trigger an away rule.
+If a device should count as home only on selected networks, enter its exact SSIDs in the **Allowed SSIDs** field on **People & devices**. An empty field accepts every FortiGate-managed SSID. A non-matching SSID starts the same conservative away grace period as a missing association; a failed FortiGate request remains unavailable and cannot trigger an away rule.
 
 Rules are reconciled only after valid Wi-Fi or policy updates. A failed Wi-Fi poll cannot act like a departure, and disable wins a conflict between equal-priority rules.
 
@@ -144,8 +144,8 @@ FortiOS permission profiles commonly grant access to a configuration area rather
 ## Recommended rule workflow
 
 1. Add selected Wi-Fi devices under **People and devices**.
-2. Combine each person's phone, watch, and tablet under **Manage people**.
-3. Open **Parental-control rules** and create the condition for each policy.
+2. Combine each person's phone, watch, and tablet on **People & devices**.
+3. Open **Policies & rules** and create the condition for each policy.
 4. Review the generated summary before confirming it.
 5. Start with **Dry run** enabled and inspect the policy decision sensors.
 6. Disable dry run when the decisions match the intended behavior.

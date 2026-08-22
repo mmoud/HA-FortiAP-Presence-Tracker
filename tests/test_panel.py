@@ -160,6 +160,16 @@ class TestPanelFrontend(unittest.TestCase):
         self.assertIn('href="/home"', source)
         self.assertIn("Back to Home Assistant overview", source)
 
+    def test_dashboard_uses_home_assistant_icons_and_semantic_metric_tones(
+        self,
+    ) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        self.assertIn('<ha-icon icon="mdi:access-point-network">', source)
+        self.assertIn('"mdi:view-dashboard-outline"', source)
+        self.assertIn("metric-card ${escapeHtml(tone)}", source)
+        self.assertIn("aria-current", source)
+
     def test_people_creation_precedes_large_discovery_catalog(self) -> None:
         source = FRONTEND.read_text(encoding="utf-8")
 

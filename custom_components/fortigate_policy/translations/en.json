@@ -57,8 +57,19 @@
         "title": "FortiGate options",
         "description": "Choose what to configure. {tracked} Wi-Fi tracker(s) are currently selected.",
         "menu_options": {
+          "firewall_policies": "Firewall policies",
           "wifi_clients": "Add or manage Wi-Fi trackers",
           "wifi_settings": "Polling and sensors"
+        }
+      },
+      "firewall_policies": {
+        "title": "Firewall policies",
+        "description": "Add or remove policy switches with a comma-separated list. Every policy is verified on FortiGate before the integration is reloaded.",
+        "data": {
+          "policy_ids": "Firewall policy IDs (comma-separated)"
+        },
+        "data_description": {
+          "policy_ids": "Example: 61, 72, 83"
         }
       },
       "wifi_settings": {

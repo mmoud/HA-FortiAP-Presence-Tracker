@@ -70,6 +70,8 @@ Open **Settings > Devices & services > FortiGate**, find the configured entry, a
 - **Add or manage Wi-Fi trackers** discovers connected and recently seen clients, keeps existing offline trackers in the list, and accepts a MAC address manually when a device is not listed.
 - **Polling and sensors** controls policy polling, Wi-Fi polling, the away grace period, and the optional client-count sensor.
 
+Use **Firewall policies** in the same Configure menu to add or remove policy switches with a comma-separated list of policy IDs. The integration verifies every policy before saving the change.
+
 On the tracker screen, enable Wi-Fi presence tracking, select one or more devices, and save. Only newly selected devices ask for a friendly name; existing names are preserved. Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. Each selected MAC creates two entities:
 
 - `device_tracker.<device_name>` with `home`, `not_home`, or unavailable state

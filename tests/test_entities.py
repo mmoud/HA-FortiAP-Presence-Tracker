@@ -18,6 +18,7 @@ from custom_components.fortigate_policy.config_flow import (
     _async_validate_input,
     _entry_data,
     _normalize,
+    _policy_options_schema,
     _preserved_client_names,
     _selected_wifi_macs,
 )
@@ -98,6 +99,20 @@ class TestWifiTrackerOptions(unittest.TestCase):
                 },
             ),
         )
+
+
+class TestPolicyOptions(unittest.TestCase):
+    def test_policy_form_defaults_to_all_configured_ids(self) -> None:
+        schema = _policy_options_schema(
+            {
+                CONF_POLICIES: [
+                    {"policy_id": "61", "policy_name": "Family access"},
+                    {"policy_id": "72", "policy_name": "Guest access"},
+                ]
+            }
+        )
+
+        self.assertEqual("61, 72", schema({})[CONF_POLICY_IDS])
 
 
 class TestPolicySwitchEntities(unittest.TestCase):

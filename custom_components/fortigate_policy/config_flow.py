@@ -139,6 +139,18 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _policy_options_schema(data: dict[str, Any]) -> vol.Schema:
+    """Return the firewall-policy selection form."""
+    policy_ids = ", ".join(policy.policy_id for policy in configured_policies(data))
+    return vol.Schema(
+        {
+            vol.Required(CONF_POLICY_IDS, default=policy_ids): TextSelector(
+                TextSelectorConfig()
+            )
+        }
+    )
+
+
 def _selected_wifi_macs(selected: object, manual: object) -> list[str]:
     """Normalize and deduplicate selected and manually entered MAC addresses."""
     values: list[object] = []
@@ -385,8 +397,40 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         tracked_count = len(tracked) if isinstance(tracked, dict) else 0
         return self.async_show_menu(
             step_id="init",
-            menu_options=["wifi_clients", "wifi_settings"],
+            menu_options=["firewall_policies", "wifi_clients", "wifi_settings"],
             description_placeholders={"tracked": str(tracked_count)},
+        )
+
+    async def async_step_firewall_policies(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add or remove policy switches using the saved connection settings."""
+        entry = self.config_entry
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                data = _normalize({**entry.data, **user_input})
+                policies, _title = await _async_validate_input(self.hass, data)
+            except (FortiGateError, ValueError) as err:
+                errors["base"] = _error_key(err)
+            else:
+                updated_data = _entry_data(data, policies)
+                legacy_primary = entry.data.get(CONF_LEGACY_PRIMARY_POLICY_ID)
+                if legacy_primary and any(
+                    policy.policy_id == legacy_primary for policy in policies
+                ):
+                    updated_data[CONF_LEGACY_PRIMARY_POLICY_ID] = legacy_primary
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data=updated_data,
+                    title=fortigate_entry_title(updated_data),
+                )
+                return self.async_create_entry(data=dict(entry.options))
+
+        return self.async_show_form(
+            step_id="firewall_policies",
+            data_schema=_policy_options_schema(dict(entry.data)),
+            errors=errors,
         )
 
     async def async_step_wifi_settings(

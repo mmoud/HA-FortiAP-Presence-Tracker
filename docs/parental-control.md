@@ -1,11 +1,12 @@
 # Parental control with FortiGate
 
-This integration supplies two pieces for a parental-control workflow:
+This integration supplies:
 
 - a presence binary sensor for each selected Wi-Fi client
 - a verified switch for each selected FortiGate firewall policy
+- optional per-tracker rules that map home and away state to policy state
 
-Home Assistant automations connect them. The integration does not silently create or run firewall automations.
+The built-in rules cover normal per-device parental control. Home Assistant automations remain available for schedules, groups, or other conditions.
 
 ## Before starting
 
@@ -22,6 +23,21 @@ In Home Assistant, confirm these entities work independently before creating an 
 - `switch.fortigate_policy_61`
 
 Use the actual entity IDs from **Settings > Devices & services > Entities**.
+
+## Built-in presence policy rules
+
+Open **Settings > Devices & services > FortiAP Presence Tracker > Configure > Presence policy rules**. Select a tracker, then choose any combination of:
+
+- policies to enable while home
+- policies to disable while home
+- policies to enable while away
+- policies to disable while away
+
+Save and repeat for other trackers. Each tracker keeps an independent profile and can control one policy or several. Leave all four lists empty to remove that tracker's profile.
+
+Rules are state-based and are reconciled after valid Wi-Fi or policy updates. If several profiles affect the same policy, disable wins. If any relevant tracker is unknown, the integration does not change that policy. A failed Wi-Fi poll therefore cannot act like a departure.
+
+The examples below use normal Home Assistant automations as an alternative when conditions beyond tracker state are needed.
 
 ## One device
 
@@ -89,7 +105,9 @@ Avoid adding another automation delay unless a second delay is intentional. Arri
 
 ## Manual override
 
-A presence automation runs when its binary sensor changes state. Manually changing the policy switch does not immediately cause the automation to change it back; the next matching presence transition will apply the configured action.
+For a policy managed by a built-in presence rule, a manual switch change is reconciled back to the rule's current desired state after the next valid policy or Wi-Fi update.
+
+A Home Assistant presence automation runs only when its binary sensor changes state. With that approach, a manual policy change remains until the next matching presence transition.
 
 For a longer override, disable the relevant Home Assistant automation rather than changing the FortiGate policy definition.
 

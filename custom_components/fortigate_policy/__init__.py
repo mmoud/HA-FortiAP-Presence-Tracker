@@ -33,6 +33,7 @@ from .const import (
 )
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
 from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
+from .policy_rules import PresencePolicyRuleManager, configured_presence_rules
 from .wifi import normalize_mac
 
 PLATFORMS: list[Platform] = [
@@ -50,6 +51,7 @@ class FortiGateRuntimeData:
 
     policy_coordinators: dict[str, FortiGatePolicyCoordinator]
     wifi_coordinator: FortiGateWifiCoordinator | None
+    rule_manager: PresencePolicyRuleManager | None
 
 
 type FortiGatePolicyConfigEntry = ConfigEntry[FortiGateRuntimeData]
@@ -167,8 +169,25 @@ async def async_setup_entry(
                 CONF_WIFI_AWAY_GRACE_PERIOD, DEFAULT_WIFI_AWAY_GRACE_PERIOD
             ),
         )
-    entry.runtime_data = FortiGateRuntimeData(policy_coordinators, wifi_coordinator)
+    rule_manager: PresencePolicyRuleManager | None = None
+    if wifi_coordinator is not None and policy_coordinators:
+        rules = configured_presence_rules(
+            entry.options,
+            tracked_macs,
+            set(policy_coordinators),
+        )
+        if rules:
+            rule_manager = PresencePolicyRuleManager(
+                hass, wifi_coordinator, policy_coordinators, rules
+            )
+    entry.runtime_data = FortiGateRuntimeData(
+        policy_coordinators, wifi_coordinator, rule_manager
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    if rule_manager is not None:
+        for unsubscribe in rule_manager.async_start():
+            entry.async_on_unload(unsubscribe)
+        entry.async_on_unload(rule_manager.async_stop)
     if wifi_coordinator is not None:
         # This is intentionally after device tracker setup: RestoreEntity can
         # seed a former home/not_home state before the first valid monitor

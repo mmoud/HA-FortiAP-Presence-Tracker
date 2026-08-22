@@ -30,12 +30,18 @@ from .api import (
 )
 from .const import (
     CONF_API_TOKEN,
+    CONF_AWAY_DISABLE_POLICIES,
+    CONF_AWAY_ENABLE_POLICIES,
     CONF_FRIENDLY_NAME,
+    CONF_HOME_DISABLE_POLICIES,
+    CONF_HOME_ENABLE_POLICIES,
     CONF_LEGACY_PRIMARY_POLICY_ID,
     CONF_POLICIES,
     CONF_POLICY_IDS,
     CONF_POLL_INTERVAL,
+    CONF_PRESENCE_POLICY_RULES,
     CONF_RECENT_WIFI_CLIENTS,
+    CONF_RULE_TRACKER,
     CONF_TRACKED_CLIENTS,
     CONF_VDOM,
     CONF_VERIFY_SSL,
@@ -67,6 +73,7 @@ from .policy_config import (
     parse_optional_policy_ids,
     serialize_policies,
 )
+from .policy_rules import RULE_FIELDS, serialize_presence_rules
 from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 TOKEN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
@@ -400,6 +407,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self._recent_clients: dict[str, dict[str, str]] = {}
         self._selected_macs: list[str] = []
         self._named_clients: dict[str, dict[str, str]] = {}
+        self._rule_mac: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -408,6 +416,8 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
         tracked_count = len(tracked) if isinstance(tracked, dict) else 0
         menu_options = ["firewall_policies", "wifi_clients"]
+        if tracked_count and configured_policies(self.config_entry.data):
+            menu_options.append("presence_policy_rules")
         if tracked_count:
             menu_options.append("remove_wifi_trackers")
         menu_options.append("wifi_settings")
@@ -439,10 +449,26 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     for mac, metadata in tracked.items()
                     if normalize_mac(mac) not in remove
                 }
+                current_rules = self.config_entry.options.get(
+                    CONF_PRESENCE_POLICY_RULES, {}
+                )
+                rules = serialize_presence_rules(
+                    current_rules if isinstance(current_rules, dict) else {},
+                    {
+                        normalized
+                        for mac in remaining
+                        if (normalized := normalize_mac(mac)) is not None
+                    },
+                    {
+                        policy.policy_id
+                        for policy in configured_policies(self.config_entry.data)
+                    },
+                )
                 return self.async_create_entry(
                     data={
                         **dict(self.config_entry.options),
                         CONF_TRACKED_CLIENTS: remaining,
+                        CONF_PRESENCE_POLICY_RULES: rules,
                     }
                 )
 
@@ -493,12 +519,114 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     data=updated_data,
                     title=fortigate_entry_title(updated_data),
                 )
-                return self.async_create_entry(data=dict(entry.options))
+                options = dict(entry.options)
+                current_rules = options.get(CONF_PRESENCE_POLICY_RULES, {})
+                options[CONF_PRESENCE_POLICY_RULES] = serialize_presence_rules(
+                    current_rules if isinstance(current_rules, dict) else {},
+                    set(self._selected_from_options()),
+                    {policy.policy_id for policy in policies},
+                )
+                return self.async_create_entry(data=options)
 
         return self.async_show_form(
             step_id="firewall_policies",
             data_schema=_policy_options_schema(dict(entry.data)),
             errors=errors,
+        )
+
+    async def async_step_presence_policy_rules(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose the tracker whose state-based policy profile is edited."""
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        policies = configured_policies(self.config_entry.data)
+        if not isinstance(tracked, dict) or not tracked:
+            return self.async_abort(reason="no_trackers")
+        if not policies:
+            return self.async_abort(reason="no_policies")
+        if user_input is not None:
+            self._rule_mac = normalize_mac(user_input.get(CONF_RULE_TRACKER))
+            if self._rule_mac in self._selected_from_options():
+                return await self.async_step_presence_policy_rule()
+
+        tracker_options = [
+            {
+                "value": mac,
+                "label": (
+                    f"{metadata.get(CONF_FRIENDLY_NAME, mac)} ({mac})"
+                    if isinstance(metadata, dict)
+                    else mac
+                ),
+            }
+            for mac, metadata in sorted(tracked.items())
+            if normalize_mac(mac) is not None
+        ]
+        return self.async_show_form(
+            step_id="presence_policy_rules",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_RULE_TRACKER): SelectSelector(
+                        SelectSelectorConfig(options=tracker_options)
+                    )
+                }
+            ),
+        )
+
+    async def async_step_presence_policy_rule(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set independent home and away policy states for one tracker."""
+        if self._rule_mac is None:
+            return await self.async_step_presence_policy_rules()
+        current_rules = self.config_entry.options.get(CONF_PRESENCE_POLICY_RULES, {})
+        if not isinstance(current_rules, dict):
+            current_rules = {}
+        current = current_rules.get(self._rule_mac, {})
+        if not isinstance(current, dict):
+            current = {}
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            home_enable = set(user_input.get(CONF_HOME_ENABLE_POLICIES, []))
+            home_disable = set(user_input.get(CONF_HOME_DISABLE_POLICIES, []))
+            away_enable = set(user_input.get(CONF_AWAY_ENABLE_POLICIES, []))
+            away_disable = set(user_input.get(CONF_AWAY_DISABLE_POLICIES, []))
+            if home_enable & home_disable or away_enable & away_disable:
+                errors["base"] = "rule_state_conflict"
+            else:
+                updated_rules = dict(current_rules)
+                rule = {
+                    field: sorted(set(user_input.get(field, [])))
+                    for field in RULE_FIELDS
+                }
+                if any(rule.values()):
+                    updated_rules[self._rule_mac] = rule
+                else:
+                    updated_rules.pop(self._rule_mac, None)
+                return self.async_create_entry(
+                    data={
+                        **dict(self.config_entry.options),
+                        CONF_PRESENCE_POLICY_RULES: updated_rules,
+                    }
+                )
+
+        policy_options = [
+            {
+                "value": policy.policy_id,
+                "label": f"{policy.expected_name or 'Policy'} ({policy.policy_id})",
+            }
+            for policy in configured_policies(self.config_entry.data)
+        ]
+        fields = {
+            vol.Optional(field, default=current.get(field, [])): SelectSelector(
+                SelectSelectorConfig(options=policy_options, multiple=True)
+            )
+            for field in RULE_FIELDS
+        }
+        return self.async_show_form(
+            step_id="presence_policy_rule",
+            data_schema=vol.Schema(fields),
+            errors=errors,
+            description_placeholders={"tracker": self._tracker_name(self._rule_mac)},
         )
 
     async def async_step_wifi_settings(
@@ -614,6 +742,15 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self._new_options[CONF_WIFI_TRACKING_ENABLED] = True
         self._new_options[CONF_TRACKED_CLIENTS] = self._named_clients
         self._new_options[CONF_RECENT_WIFI_CLIENTS] = self._recent_clients
+        current_rules = self._new_options.get(CONF_PRESENCE_POLICY_RULES, {})
+        self._new_options[CONF_PRESENCE_POLICY_RULES] = serialize_presence_rules(
+            current_rules if isinstance(current_rules, dict) else {},
+            set(self._selected_macs),
+            {
+                policy.policy_id
+                for policy in configured_policies(self.config_entry.data)
+            },
+        )
         return self.async_create_entry(data=self._new_options)
 
     async def _async_discover_wifi_clients(
@@ -678,3 +815,13 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
 
     def _default_name(self, mac: str) -> str:
         return self._recent_clients.get(mac, {}).get("hostname") or mac
+
+    def _tracker_name(self, mac: str) -> str:
+        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
+        if isinstance(tracked, dict):
+            metadata = tracked.get(mac)
+            if isinstance(metadata, dict):
+                name = metadata.get(CONF_FRIENDLY_NAME)
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
+        return mac

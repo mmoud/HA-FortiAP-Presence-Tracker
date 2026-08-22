@@ -43,6 +43,7 @@
     "abort": {
       "already_configured": "This FortiGate policy is already configured.",
       "no_trackers": "There are no configured Wi-Fi trackers to remove.",
+      "no_policies": "There are no configured firewall policies.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -51,6 +52,7 @@
       "cannot_connect": "Cannot reach FortiGate, its TLS certificate could not be verified, or it returned unexpected JSON.",
       "invalid_auth": "FortiGate rejected the token or its permissions.",
       "not_found": "The Wi-Fi monitor endpoint, VDOM, or configured policy was not found.",
+      "rule_state_conflict": "A policy cannot be both enabled and disabled for the same presence state.",
       "select_at_least_one": "Select a discovered device or enter at least one valid MAC address.",
       "select_tracker_to_remove": "Select at least one tracker to remove."
     },
@@ -61,6 +63,7 @@
         "menu_options": {
           "firewall_policies": "Firewall policies",
           "wifi_clients": "Add or manage Wi-Fi trackers",
+          "presence_policy_rules": "Presence policy rules",
           "remove_wifi_trackers": "Remove Wi-Fi trackers",
           "wifi_settings": "Polling and sensors"
         }
@@ -73,6 +76,23 @@
         },
         "data_description": {
           "policy_ids": "Example: 61, 72, 83. Leave empty to disable firewall-policy control."
+        }
+      },
+      "presence_policy_rules": {
+        "title": "Presence policy rules",
+        "description": "Choose a tracked device. Each device can control its own set of firewall policies.",
+        "data": {
+          "rule_tracker": "Tracked device"
+        }
+      },
+      "presence_policy_rule": {
+        "title": "Policy rules for {tracker}",
+        "description": "Choose the required policy state while this device is home and away. Leave all fields empty to remove this device's rule. If different devices conflict, disable wins. Unknown presence never changes a policy.",
+        "data": {
+          "home_enable_policies": "Enable while home",
+          "home_disable_policies": "Disable while home",
+          "away_enable_policies": "Enable while away",
+          "away_disable_policies": "Disable while away"
         }
       },
       "wifi_settings": {

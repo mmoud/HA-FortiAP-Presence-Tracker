@@ -20,6 +20,12 @@ CONF_WIFI_CLIENT_COUNT_SENSOR = "wifi_client_count_sensor"
 CONF_TRACKED_CLIENTS = "tracked_clients"
 CONF_RECENT_WIFI_CLIENTS = "recent_wifi_clients"
 CONF_FRIENDLY_NAME = "friendly_name"
+CONF_PRESENCE_POLICY_RULES = "presence_policy_rules"
+CONF_RULE_TRACKER = "rule_tracker"
+CONF_HOME_ENABLE_POLICIES = "home_enable_policies"
+CONF_HOME_DISABLE_POLICIES = "home_disable_policies"
+CONF_AWAY_ENABLE_POLICIES = "away_enable_policies"
+CONF_AWAY_DISABLE_POLICIES = "away_disable_policies"
 
 DEFAULT_PORT = 443
 DEFAULT_VDOM = "root"

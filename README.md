@@ -88,13 +88,13 @@ PUT /api/v2/cmdb/firewall/policy/<policy-id>?vdom=<vdom>
 The PUT body changes only the policy status:
 
 ```json
-{"data":{"status":"enable"}}
+{"status":"enable"}
 ```
 
 or:
 
 ```json
-{"data":{"status":"disable"}}
+{"status":"disable"}
 ```
 
 Before a write, the integration reads the selected policy and checks its ID and stored name. After the write, it reads that policy again and updates its switch only after FortiGate reports the requested state. A failed or unreliable read makes that switch unavailable; it is never interpreted as OFF.

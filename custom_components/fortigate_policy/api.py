@@ -145,8 +145,12 @@ class FortiGatePolicyApi:
         if status not in VALID_STATUSES:
             raise FortiGateCommandError("Invalid requested policy status")
 
+        # The public CMDB endpoint expects the object being updated as the
+        # request body.  The ``data`` envelope shown by FortiGate's internal
+        # JSON-RPC/API Preview is not part of this REST request; FortiOS can
+        # return HTTP 200 for that envelope while ignoring the nested field.
         payload = await self._async_request(
-            "PUT", self._policy_url, json={"data": {"status": status}}
+            "PUT", self._policy_url, json={"status": status}
         )
         if payload.get("status") != "success":
             raise FortiGateCommandError("FortiGate did not report a successful update")

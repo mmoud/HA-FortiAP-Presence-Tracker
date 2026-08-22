@@ -136,7 +136,8 @@ class TestFortiGatePolicyApi(unittest.TestCase):
             "https://fortigate.example.test:9443/api/v2/cmdb/firewall/policy/123?vdom=root",
             str(url),
         )
-        self.assertEqual({"data": {"status": "disable"}}, kwargs["json"])
+        self.assertEqual({"status": "disable"}, kwargs["json"])
+        self.assertNotIn("data", kwargs["json"])
 
     def test_unsuccessful_write_response_is_rejected(self) -> None:
         session = FakeSession([FakeResponse(200, {"status": "error"})])

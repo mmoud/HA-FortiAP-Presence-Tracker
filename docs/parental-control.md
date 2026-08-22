@@ -8,6 +8,8 @@ This integration supplies:
 
 The built-in rules cover normal per-user parental control. Home Assistant automations remain available for schedules or other conditions.
 
+The features are independent. A policy-only installation can disable Wi-Fi tracking and use only verified `switch` entities. A presence-only installation can leave the policy list empty and use only trackers, presence sensors, and people. This guide covers the combined mode where presence controls one or more policies.
+
 ## Before starting
 
 Use a dedicated FortiGate policy whose match criteria and position have already been tested. Decide what its enabled state means:

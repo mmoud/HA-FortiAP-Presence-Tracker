@@ -30,11 +30,43 @@ It provides:
 
 No YAML configuration is required.
 
-The FortiGate device includes a **Refresh data** button. It requests an immediate read of every configured policy and the shared Wi-Fi client dataset; it does not change firewall configuration.
+The FortiGate device includes a **Refresh data** button. It requests an immediate read of the enabled features; it does not change firewall configuration.
+
+## Choose an operating mode
+
+Policy control and Wi-Fi presence tracking are independent. Use only the features needed for the installation.
+
+### Policy-only mode
+
+Use this mode when Home Assistant should provide normal switches for existing FortiGate policies without creating Wi-Fi trackers or people.
+
+1. Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**.
+2. Under **Settings**, turn off **Enable Wi-Fi presence tracking**.
+3. Under **Policies & rules**, add one or more existing FortiGate policy IDs.
+4. Leave people and presence rules empty, then select **Save changes**.
+
+Home Assistant creates one switch for each verified policy, such as `switch.fortigate_policy_61`. Turning the switch on enables the policy; turning it off disables the policy. Each command is followed by a FortiGate read-back, so a rejected or unverified change cannot leave the switch showing the requested state. Multiple policies remain independent switches and can be used in dashboards, automations, and HomeKit Bridge.
+
+Policy-only mode does not call the FortiGate Wi-Fi client endpoint and does not require FortiAPs. Its API administrator needs firewall-policy read/write permission in the configured VDOM.
+
+### Presence-only mode
+
+Use this mode for `device_tracker` and presence `binary_sensor` entities without allowing the integration to modify firewall policies.
+
+1. Leave the firewall policy list empty.
+2. Enable Wi-Fi presence tracking under **Settings**.
+3. Add trackers and optional multi-device people under **People & devices**.
+4. Leave policy rules empty and save.
+
+Presence-only mode needs read access to Wireless Controller monitor data. It does not need firewall-policy write permission.
+
+### Combined mode
+
+Configure both trackers and policy IDs when presence should control policies. Add people under **People & devices**, then define the required policy behavior under **Policies & rules**. Unknown or unavailable presence never acts as an away result.
 
 ## FortiGate API account
 
-Create a dedicated REST API administrator, for example `homeassistant-api`. Tracker-only installations need read access to Wireless Controller monitor data. Firewall-policy switches additionally require read/write access to firewall policies in the required VDOM.
+Create a dedicated REST API administrator, for example `homeassistant-api`. Presence-only installations need read access to Wireless Controller monitor data. Policy-only installations need read/write access to firewall policies in the required VDOM. Combined installations need both permission sets.
 
 FortiOS permission profiles are generally scoped to configuration areas, not to one policy ID. Use the integration's expected-policy-name check as an additional safeguard, and restrict the API administrator's trusted hosts to the Home Assistant IP where possible.
 

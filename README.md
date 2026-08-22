@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="brand/icon.png" alt="FortiAP Presence Tracker" width="160">
+</p>
+
 # FortiAP Presence Tracker for Home Assistant
 
 Home Assistant integration for controlling FortiGate firewall policies and tracking selected FortiAP Wi-Fi clients.

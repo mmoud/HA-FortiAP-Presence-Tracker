@@ -52,7 +52,6 @@
       "no_policies": "There are no configured firewall policies.",
       "no_presence_users": "There are no configured presence users.",
       "no_policy_rules": "There are no configured policy rules.",
-      "all_trackers_assigned": "Every tracked device already belongs to a person. Add another tracked device or create a rule for an existing person.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -87,19 +86,11 @@
       },
       "people_devices": {
         "title": "People and devices",
-        "description": "Manage {tracked} tracked devices and {users} people. A person can include a phone, watch, tablet, or any combination of tracked devices.",
+        "description": "Manage {tracked} tracked devices and {users} people. A person can include a phone, watch, tablet, or any combination of tracked devices.\n\nConfigured people and assignments:\n\n{people}",
         "menu_options": {
           "wifi_clients": "Add or manage tracked devices",
-          "view_presence_users": "View people and assigned devices",
           "presence_users": "Manage people",
           "remove_wifi_trackers": "Remove tracked devices"
-        }
-      },
-      "view_presence_users": {
-        "title": "People overview",
-        "description": "{count} configured people:\n\n{people}\n\nThis page is read-only. Use Manage people and assignments only when you want to make changes.",
-        "menu_options": {
-          "presence_users": "Manage people and assignments"
         }
       },
       "parental_controls": {
@@ -132,6 +123,13 @@
         "menu_options": {
           "firewall_policies": "Add firewall policy control",
           "presence_users": "Create presence-only people"
+        }
+      },
+      "guided_existing_person": {
+        "title": "Guided setup: choose an existing person",
+        "description": "Step 1 of 3. Every tracked device is already assigned, so choose the existing person this new policy rule should follow. Their device assignments will not be changed.",
+        "data": {
+          "presence_user_id": "Person"
         }
       },
       "guided_policy": {

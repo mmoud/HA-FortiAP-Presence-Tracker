@@ -37,7 +37,7 @@ For a new policy-controlled person, choose **Guided policy-based parental contro
 
 The person is saved only with the confirmed rule. If trackers or policies have not been configured yet, guided setup opens the missing prerequisite screen first.
 
-Use **People and devices > View people and assigned devices** for a read-only list of all configured people and their phones, watches, tablets, or other trackers. Use **Manage people** only when assignments need to change. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
+The **People and devices** page itself shows a read-only list of all configured people and their phones, watches, tablets, or other trackers. Use **Manage people** only when assignments need to change. If every tracker is already assigned, guided setup asks which existing person the new rule should follow. Use **Parental-control rules** for multi-person rules, priorities, schedules, and later edits. Each person has an aggregate device tracker and presence binary sensor. One assigned device at home makes the person home immediately. The person becomes away only when every assigned device is away after its grace period. If none is home but any device is unknown, the person is unavailable.
 
 Rules are reconciled only after valid Wi-Fi or policy updates. A failed Wi-Fi poll cannot act like a departure, and disable wins a conflict between equal-priority rules.
 

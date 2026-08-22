@@ -585,29 +585,16 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         user_count = len(users) if isinstance(users, dict) else 0
         menu = ["wifi_clients"]
         if tracked_count:
-            if user_count:
-                menu.append("view_presence_users")
             menu.extend(["presence_users", "remove_wifi_trackers"])
+        overview = _people_overview(dict(self.config_entry.options))
         return self.async_show_menu(
             step_id="people_devices",
             menu_options=menu,
             description_placeholders={
                 "tracked": str(tracked_count),
                 "users": str(user_count),
+                "people": overview["people"],
             },
-        )
-
-    async def async_step_view_presence_users(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """List every configured person and assigned device without editing."""
-        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-        if not isinstance(users, dict) or not users:
-            return self.async_abort(reason="no_presence_users")
-        return self.async_show_menu(
-            step_id="view_presence_users",
-            menu_options=["presence_users"],
-            description_placeholders=_people_overview(dict(self.config_entry.options)),
         )
 
     async def async_step_parental_controls(
@@ -650,7 +637,10 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         if not configured_policies(self.config_entry.data):
             return await self.async_step_guided_policy_required()
         if not self._unassigned_tracker_options():
-            return self.async_abort(reason="all_trackers_assigned")
+            users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+            if isinstance(users, dict) and users:
+                return await self.async_step_guided_existing_person(user_input)
+            return await self.async_step_wifi_clients()
         self._presence_user_id = self._presence_user_id or uuid4().hex
         return await self.async_step_guided_person(user_input)
 
@@ -662,6 +652,43 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             step_id="guided_policy_required",
             menu_options=["firewall_policies", "presence_users"],
         )
+
+    async def async_step_guided_existing_person(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Use an existing person when every tracker is already assigned."""
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        if not isinstance(users, dict) or not users:
+            return await self.async_step_presence_users()
+        if user_input is not None:
+            selected = user_input.get(CONF_PRESENCE_USER_ID)
+            if isinstance(selected, str) and selected in users:
+                self._presence_user_id = selected
+                self._pending_guided_user = None
+                return await self.async_step_guided_policy()
+        return self.async_show_form(
+            step_id="guided_existing_person",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PRESENCE_USER_ID): SelectSelector(
+                        SelectSelectorConfig(options=self._user_options())
+                    )
+                }
+            ),
+        )
+
+    def _guided_person_name(self) -> str | None:
+        """Return the new or existing person selected by guided setup."""
+        if self._pending_guided_user is not None:
+            return str(self._pending_guided_user[CONF_PRESENCE_USER_NAME])
+        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
+        if not isinstance(users, dict) or self._presence_user_id is None:
+            return None
+        user = users.get(self._presence_user_id)
+        if not isinstance(user, dict):
+            return None
+        name = str(user.get(CONF_PRESENCE_USER_NAME, "")).strip()
+        return name or None
 
     async def async_step_guided_person(
         self, user_input: dict[str, Any] | None = None
@@ -732,7 +759,8 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Collect policy behavior before using the normal verified preview."""
-        if self._presence_user_id is None or self._pending_guided_user is None:
+        person = self._guided_person_name()
+        if self._presence_user_id is None or person is None:
             return await self.async_step_guided_parental_control()
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -761,7 +789,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     ),
                 }
                 return await self.async_step_guided_policy_rule_preview()
-        person = self._pending_guided_user[CONF_PRESENCE_USER_NAME]
         policy_options = [
             {
                 "value": policy.policy_id,

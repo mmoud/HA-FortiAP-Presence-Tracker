@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from homeassistant.const import CONF_HOST, CONF_PORT
 
+from custom_components.fortigate_policy import async_setup_entry
 from custom_components.fortigate_policy.api import Policy
 from custom_components.fortigate_policy.binary_sensor import (
     FortiGateWifiPresenceBinarySensor,
@@ -53,6 +54,14 @@ class FakePolicyCoordinator:
         self.data = policy
         self.last_update_success = True
         self.last_successful_check = NOW
+
+
+class FakeConfigEntries:
+    def __init__(self) -> None:
+        self.forwarded = False
+
+    async def async_forward_entry_setups(self, _entry, _platforms) -> None:
+        self.forwarded = True
 
 
 class TestPresenceBinarySensor(unittest.TestCase):
@@ -114,6 +123,32 @@ class TestPolicyOptions(unittest.TestCase):
 
         self.assertEqual("61, 72", schema({})[CONF_POLICY_IDS])
 
+    def test_tracker_only_entry_sets_up_without_policy_coordinator(self) -> None:
+        config_entries = FakeConfigEntries()
+        hass = SimpleNamespace(config_entries=config_entries)
+        entry = SimpleNamespace(
+            data={
+                CONF_HOST: "fortigate.example.test",
+                CONF_PORT: 443,
+                CONF_VDOM: "root",
+                CONF_POLICIES: [],
+                CONF_API_TOKEN: "test-token",
+                CONF_VERIFY_SSL: True,
+            },
+            options={},
+        )
+
+        with patch(
+            "custom_components.fortigate_policy.async_get_clientsession",
+            return_value=FakeSession([]),
+        ):
+            result = asyncio.run(async_setup_entry(hass, entry))  # type: ignore[arg-type]
+
+        self.assertTrue(result)
+        self.assertEqual({}, entry.runtime_data.policy_coordinators)
+        self.assertIsNone(entry.runtime_data.wifi_coordinator)
+        self.assertTrue(config_entries.forwarded)
+
 
 class TestPolicySwitchEntities(unittest.TestCase):
     def test_each_policy_has_independent_state_and_stable_unique_id(self) -> None:
@@ -150,6 +185,30 @@ class TestPolicySwitchEntities(unittest.TestCase):
 
 
 class TestMultiPolicyValidation(unittest.TestCase):
+    def test_tracker_only_setup_validates_wifi_monitor(self) -> None:
+        session = FakeSession([FakeResponse(200, {"status": "success", "results": []})])
+        normalized = _normalize(
+            {
+                CONF_HOST: "fortigate.example.test",
+                CONF_PORT: 443,
+                CONF_VDOM: "root",
+                CONF_POLICY_IDS: "",
+                CONF_API_TOKEN: "test-token",
+                CONF_VERIFY_SSL: True,
+            }
+        )
+        with patch(
+            "custom_components.fortigate_policy.config_flow.async_get_clientsession",
+            return_value=session,
+        ):
+            policies, title = asyncio.run(
+                _async_validate_input(SimpleNamespace(), normalized)  # type: ignore[arg-type]
+            )
+
+        self.assertEqual((), policies)
+        self.assertEqual("FortiGate fortigate.example.test", title)
+        self.assertEqual("/api/v2/monitor/wifi/client", session.requests[0][1].path)
+
     def test_every_requested_policy_is_read_before_saving(self) -> None:
         session = FakeSession(
             [

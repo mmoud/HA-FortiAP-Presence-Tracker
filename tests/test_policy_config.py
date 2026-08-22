@@ -21,6 +21,7 @@ configured_policies = policy_config.configured_policies
 fortigate_entry_title = policy_config.fortigate_entry_title
 migrate_v1_data = policy_config.migrate_v1_data
 parse_policy_ids = policy_config.parse_policy_ids
+parse_optional_policy_ids = policy_config.parse_optional_policy_ids
 serialize_policies = policy_config.serialize_policies
 
 
@@ -44,6 +45,11 @@ class TestPolicyConfiguration(unittest.TestCase):
         for invalid in ("", "61,", "61,abc", "61;72"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 parse_policy_ids(invalid)
+
+    def test_tracker_only_policy_selection_is_empty(self) -> None:
+        self.assertEqual((), parse_optional_policy_ids(""))
+        self.assertEqual((), parse_optional_policy_ids("   "))
+        self.assertEqual((), configured_policies({const.CONF_POLICIES: []}))
 
     def test_current_policy_list_round_trip(self) -> None:
         expected = (

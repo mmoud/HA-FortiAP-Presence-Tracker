@@ -2,25 +2,25 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to FortiGate policies",
-        "description": "Enter one policy ID or a comma-separated list. Every policy is read and identity-checked before this entry is created.",
+        "title": "Connect to FortiGate",
+        "description": "Policy control is optional. Leave policy IDs empty for Wi-Fi tracking only, or enter one or more comma-separated IDs to create policy switches.",
         "data": {
           "host": "FortiGate hostname or IP address",
           "port": "HTTPS port",
           "vdom": "VDOM",
-          "policy_ids": "Firewall policy IDs (comma-separated)",
+          "policy_ids": "Firewall policy IDs (optional, comma-separated)",
           "api_token": "REST API token",
           "verify_ssl": "Verify FortiGate TLS certificate"
         }
       },
       "reconfigure": {
-        "title": "Reconfigure FortiGate policies",
-        "description": "Enter one policy ID or a comma-separated list. Enter the API token again because its saved value is not shown.",
+        "title": "Reconfigure FortiGate",
+        "description": "Leave policy IDs empty for Wi-Fi tracking only. Enter the API token again because its saved value is not shown.",
         "data": {
           "host": "FortiGate hostname or IP address",
           "port": "HTTPS port",
           "vdom": "VDOM",
-          "policy_ids": "Firewall policy IDs (comma-separated)",
+          "policy_ids": "Firewall policy IDs (optional, comma-separated)",
           "api_token": "REST API token",
           "verify_ssl": "Verify FortiGate TLS certificate"
         }
@@ -37,7 +37,7 @@
       "cannot_connect": "Cannot reach FortiGate, its TLS certificate could not be verified, or it returned unexpected JSON.",
       "invalid_auth": "FortiGate rejected the token or its permissions.",
       "not_found": "The VDOM or one of the firewall policy IDs was not found.",
-      "invalid_input": "Enter a hostname/IP, VDOM, token, and comma-separated numeric policy IDs.",
+      "invalid_input": "Enter a hostname/IP, VDOM, and token. Policy IDs, when supplied, must be comma-separated numbers.",
       "unknown": "Unexpected error while validating the FortiGate policy."
     },
     "abort": {
@@ -64,12 +64,12 @@
       },
       "firewall_policies": {
         "title": "Firewall policies",
-        "description": "Add or remove policy switches with a comma-separated list. Every policy is verified on FortiGate before the integration is reloaded.",
+        "description": "Add policy switches with a comma-separated list, or leave this empty for Wi-Fi tracking only. Every listed policy is verified before reloading.",
         "data": {
-          "policy_ids": "Firewall policy IDs (comma-separated)"
+          "policy_ids": "Firewall policy IDs (optional, comma-separated)"
         },
         "data_description": {
-          "policy_ids": "Example: 61, 72, 83"
+          "policy_ids": "Example: 61, 72, 83. Leave empty to disable firewall-policy control."
         }
       },
       "wifi_settings": {

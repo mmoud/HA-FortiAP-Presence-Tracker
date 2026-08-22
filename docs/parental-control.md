@@ -27,6 +27,18 @@ Use the actual entity IDs from **Settings > Devices & services > Entities**.
 
 This example makes an access policy follow one device. It enables the policy when the device connects and disables it after the device has been absent for the configured grace period.
 
+### Create it in the Home Assistant UI
+
+1. Open **Settings > Automations & scenes > Create automation > Create new automation**.
+2. Add an **Entity state** trigger for the child's presence binary sensor, changing to **On**.
+3. Add a **Switch: Turn on** action and select the FortiGate policy switch.
+4. Save the automation as `Child Wi-Fi access - enable on arrival`.
+5. Create a second automation with the same presence sensor changing to **Off** and a **Switch: Turn off** action.
+
+For a restriction policy, use **Turn off** on arrival and **Turn on** on departure. No YAML configuration is required.
+
+### YAML reference
+
 ```yaml
 alias: Child Wi-Fi access - enable on arrival
 triggers:

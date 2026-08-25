@@ -121,6 +121,8 @@ PUT /api/v2/cmdb/user/quarantine?vdom=<vdom>
 
 It does not create or modify firewall policies. The integration reads the complete quarantine table once per polling cycle and maps normalized MAC addresses to devices. When a switch changes, it reads the current table, changes only that MAC, preserves every unrelated target and MAC, writes the merged `targets` table, and reads it again. The switch changes only after FortiGate reports the requested state. Manual FortiGate quarantine entries are also detected.
 
+The dashboard overview lists selected devices that are currently quarantined and provides a verified **Release** action. It also reports the number of FortiGate quarantine entries that are not associated with a selected tracker. Dashboard state is reloaded immediately after every quarantine command.
+
 New entries use the deterministic target name `HA_<MAC>` and `drop enable`. Releasing a device removes only its MAC; it removes an empty target only when its name exactly matches the integration's deterministic name for that MAC. Repeating either action is safe and does not create duplicates.
 
 Native quarantine must already be enabled on the FortiGate. The integration deliberately does not enable the global quarantine setting, choose a quarantine mode, create an address group, or change any policy, interface, VLAN, or SSID. If quarantine is disabled or the API account lacks permission, the command fails and the switch remains at the last verified state or becomes unavailable.

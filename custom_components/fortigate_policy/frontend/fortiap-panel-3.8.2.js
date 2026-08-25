@@ -184,7 +184,9 @@ class FortiApPresencePanel extends HTMLElement {
         tracker.quarantine = verified.quarantined ? "on" : "off";
         tracker.quarantine_available = true;
       }
-      this._notice = `Native FortiGate quarantine is verified ${verified.quarantined ? "on" : "off"}.`;
+      const notice = `Native FortiGate quarantine is verified ${verified.quarantined ? "on" : "off"}.`;
+      await this._load(this._data.entry_id);
+      this._notice = notice;
     } catch (error) {
       this._notice = "";
       this._error = `${error?.message || "Unable to change quarantine."} The displayed state was not changed.`;
@@ -331,6 +333,7 @@ class FortiApPresencePanel extends HTMLElement {
       ${this._metric("People", d.users.length, "Multi-device presence groups", "account-group", "green")}
       ${this._metric("Firewall policies", d.policies.length, "Status-only verified control", "shield-check", "orange")}
       ${this._metric("Quarantined", health.quarantined_clients ?? "–", health.quarantine_available ? "Native FortiGate state available" : "Native quarantine unavailable", "shield-lock-outline", "purple")}
+      <section class="card"><div class="section-head"><div class="section-title"><span class="section-icon">${this._icon("shield-lock-outline")}</span><div><h2>Quarantined devices</h2><div class="muted">Verified native FortiGate quarantine state</div></div></div></div>${this._quarantinedSummary()}</section>
       <section class="card span-6"><div class="section-head"><div class="section-title"><span class="section-icon">${this._icon("router-wireless")}</span><div><h2>Connection</h2><div class="muted">FortiGate management path</div></div></div><span class="status ${health.wifi_available ? "ok" : "unavailable"}">${this._icon(health.wifi_available ? "check-circle" : "alert-circle")}${health.wifi_available ? "Wi-Fi API available" : "Wi-Fi API unavailable"}</span></div>
         <div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(d.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(d.connection.vdom)}</strong></div><div><div class="muted">HTTPS port</div><strong>${escapeHtml(d.connection.port)}</strong></div><div><div class="muted">FortiOS</div><strong>${escapeHtml(health.fortios_version || "Unknown")}</strong></div></div>
       </section>
@@ -352,6 +355,23 @@ class FortiApPresencePanel extends HTMLElement {
   _peopleSummary() {
     if (!this._draft.users.length) return `<div class="empty">No people configured yet.</div>`;
     return `<table class="mobile-table"><thead><tr><th>Person</th><th>Assigned devices</th><th>Away grace</th></tr></thead><tbody>${this._draft.users.map((user) => `<tr><td data-label="Person"><strong>${escapeHtml(user.name)}</strong></td><td data-label="Devices">${escapeHtml(user.macs.map((mac) => this._trackerName(mac)).join(", ") || "None")}</td><td data-label="Away grace">${escapeHtml(user.away_grace_period)} seconds</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  _quarantinedSummary() {
+    const tracked = this._draft.trackers.filter((item) => item.quarantine === "on");
+    const reportedTotal = Number(this._draft.health?.quarantined_clients);
+    const total = Number.isFinite(reportedTotal) ? reportedTotal : tracked.length;
+    const untracked = Math.max(0, total - tracked.length);
+    if (!tracked.length && !untracked) {
+      return `<div class="empty">No devices are currently quarantined.</div>`;
+    }
+    const table = tracked.length
+      ? `<table class="mobile-table"><thead><tr><th>Device</th><th>Presence</th><th>Current connection</th><th>Control</th></tr></thead><tbody>${tracked.map((item) => `<tr><td data-label="Device"><strong>${escapeHtml(item.name)}</strong><div class="mono muted">${escapeHtml(item.mac)}</div></td><td data-label="Presence"><span class="status ${escapeHtml(item.state)}">${escapeHtml(item.state)}</span></td><td data-label="Connection"><strong>${escapeHtml(item.client?.ssid || "—")}</strong><div class="muted">${escapeHtml(item.client?.ap_name || "No current FortiAP")}</div></td><td data-label="Control">${this._quarantineAction(item)}</td></tr>`).join("")}</tbody></table>`
+      : "";
+    const untrackedNote = untracked
+      ? `<p class="muted">${escapeHtml(untracked)} additional FortiGate quarantine ${untracked === 1 ? "entry is" : "entries are"} not associated with a selected tracker.</p>`
+      : "";
+    return `${table}${untrackedNote}`;
   }
 
   _people() {

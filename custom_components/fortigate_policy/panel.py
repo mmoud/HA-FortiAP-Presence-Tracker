@@ -77,7 +77,7 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-PANEL_VERSION = "3.8.1"
+PANEL_VERSION = "3.8.2"
 FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
 
 _LOGGER = logging.getLogger(__name__)

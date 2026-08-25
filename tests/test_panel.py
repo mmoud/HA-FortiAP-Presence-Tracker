@@ -225,6 +225,14 @@ class TestPanelFrontend(unittest.TestCase):
         self.assertIn('data-action="set-policy"', source)
         self.assertIn("panel/policy/set", source)
 
+    def test_quarantine_commands_reload_and_overview_lists_devices(self) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        self.assertIn("<h2>Quarantined devices</h2>", source)
+        self.assertIn("_quarantinedSummary()", source)
+        self.assertIn("additional FortiGate quarantine", source)
+        self.assertIn("await this._load(this._data.entry_id)", source)
+
     def test_automation_tab_links_to_native_home_assistant_workflows(self) -> None:
         source = FRONTEND.read_text(encoding="utf-8")
 

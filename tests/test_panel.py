@@ -138,6 +138,18 @@ class TestPanelSnapshot(unittest.TestCase):
         self.assertNotIn("rssi", result)
         self.assertNotIn("snr", result)
 
+    def test_snapshot_is_safe_while_config_entry_is_starting(self) -> None:
+        """A panel opened during startup shows unavailable instead of raising."""
+        starting_entry = entry()
+        del starting_entry.runtime_data
+
+        result = _panel_data(starting_entry)
+
+        self.assertEqual("unavailable", result["trackers"][0]["state"])
+        self.assertFalse(result["trackers"][0]["available"])
+        self.assertEqual("unavailable", result["policies"][0]["state"])
+        self.assertIsNone(result["health"]["wifi_available"])
+
 
 class TestPanelFrontend(unittest.TestCase):
     """Keep essential full-page management controls prominent."""

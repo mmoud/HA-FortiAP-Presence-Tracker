@@ -75,7 +75,7 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-PANEL_VERSION = "3.7.0"
+PANEL_VERSION = "3.7.1"
 FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
 
 _LOGGER = logging.getLogger(__name__)
@@ -113,8 +113,8 @@ def _client_payload(client: FortiGateWifiClient) -> dict[str, Any]:
     }
 
 
-def _tracker_state(entry, mac: str) -> dict[str, Any]:
-    coordinator = entry.runtime_data.wifi_coordinator
+def _tracker_state(runtime: object | None, mac: str) -> dict[str, Any]:
+    coordinator = getattr(runtime, "wifi_coordinator", None)
     if coordinator is None:
         return {"state": "unavailable", "available": False}
     presence = coordinator.presence_for(mac)
@@ -142,6 +142,7 @@ def _tracker_state(entry, mac: str) -> dict[str, Any]:
 def _panel_data(entry) -> dict[str, Any]:
     """Build one safe, complete management-page snapshot."""
     options = entry.options
+    runtime = getattr(entry, "runtime_data", None)
     tracked_raw = options.get(CONF_TRACKED_CLIENTS, {})
     tracked_raw = tracked_raw if isinstance(tracked_raw, Mapping) else {}
     trackers = []
@@ -161,15 +162,16 @@ def _panel_data(entry) -> dict[str, Any]:
                 ]
                 if isinstance(metadata.get(CONF_ALLOWED_SSIDS, []), list)
                 else [],
-                **_tracker_state(entry, mac),
+                **_tracker_state(runtime, mac),
             }
         )
 
     policy_ids = {policy.policy_id for policy in configured_policies(entry.data)}
     tracked_macs = {tracker["mac"] for tracker in trackers}
     users = configured_presence_users(options, tracked_macs, policy_ids)
-    runtime = entry.runtime_data
     network_store = getattr(runtime, "network_store", None)
+    wifi_coordinator = getattr(runtime, "wifi_coordinator", None)
+    policy_coordinators = getattr(runtime, "policy_coordinators", {})
     recent = options.get(CONF_RECENT_WIFI_CLIENTS, {})
     recent = dict(recent) if isinstance(recent, Mapping) else {}
     if network_store:
@@ -192,10 +194,10 @@ def _panel_data(entry) -> dict[str, Any]:
         for metadata in recent.values()
         if isinstance(metadata, Mapping) and metadata.get("ssid")
     }
-    if runtime.wifi_coordinator and runtime.wifi_coordinator.data:
+    if wifi_coordinator and wifi_coordinator.data:
         known_ssids.update(
             client.ssid
-            for client in runtime.wifi_coordinator.data.clients.values()
+            for client in wifi_coordinator.data.clients.values()
             if client.ssid
         )
 
@@ -255,9 +257,9 @@ def _panel_data(entry) -> dict[str, Any]:
                 "id": policy.policy_id,
                 "name": policy.expected_name,
                 "state": (
-                    runtime.policy_coordinators[policy.policy_id].data.status
-                    if runtime.policy_coordinators.get(policy.policy_id)
-                    and runtime.policy_coordinators[policy.policy_id].data
+                    policy_coordinators[policy.policy_id].data.status
+                    if policy_coordinators.get(policy.policy_id)
+                    and policy_coordinators[policy.policy_id].data
                     else "unavailable"
                 ),
             }
@@ -273,37 +275,32 @@ def _panel_data(entry) -> dict[str, Any]:
         ],
         "health": {
             "wifi_available": (
-                runtime.wifi_coordinator.last_update_success
-                if runtime.wifi_coordinator
-                else None
+                wifi_coordinator.last_update_success if wifi_coordinator else None
             ),
             "last_wifi_update": (
-                runtime.wifi_coordinator.last_successful_update.isoformat()
-                if runtime.wifi_coordinator
-                and runtime.wifi_coordinator.last_successful_update
+                wifi_coordinator.last_successful_update.isoformat()
+                if wifi_coordinator and wifi_coordinator.last_successful_update
                 else None
             ),
             "fortios_version": (
-                runtime.wifi_coordinator.data.fortios_version
-                if runtime.wifi_coordinator and runtime.wifi_coordinator.data
+                wifi_coordinator.data.fortios_version
+                if wifi_coordinator and wifi_coordinator.data
                 else None
             ),
             "known_network_devices": (
                 len(network_store.records) if network_store else 0
             ),
             "connected_network_devices": (
-                len(runtime.wifi_coordinator.data.clients)
-                if runtime.wifi_coordinator and runtime.wifi_coordinator.data
+                len(wifi_coordinator.data.clients)
+                if wifi_coordinator and wifi_coordinator.data
                 else None
             ),
             "grace_network_devices": (
                 sum(
                     state.missing_since is not None and state.is_connected is not False
-                    for state in getattr(
-                        runtime.wifi_coordinator.data, "presence", {}
-                    ).values()
+                    for state in getattr(wifi_coordinator.data, "presence", {}).values()
                 )
-                if runtime.wifi_coordinator and runtime.wifi_coordinator.data
+                if wifi_coordinator and wifi_coordinator.data
                 else None
             ),
         },
@@ -369,7 +366,8 @@ async def websocket_set_policy_status(
         connection.send_error(msg["id"], "not_found", str(err))
         return
 
-    coordinator = entry.runtime_data.policy_coordinators.get(msg["policy_id"])
+    runtime = getattr(entry, "runtime_data", None)
+    coordinator = getattr(runtime, "policy_coordinators", {}).get(msg["policy_id"])
     if coordinator is None:
         connection.send_error(
             msg["id"],

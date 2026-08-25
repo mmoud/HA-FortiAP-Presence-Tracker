@@ -63,12 +63,12 @@ Create a dedicated REST API administrator such as `homeassistant-api`.
 
 - Presence tracking needs read access to Wireless Controller monitor data.
 - Policy switches need read/write access to firewall policies in the configured VDOM.
-- Quarantine switches need read/write access to **User & Device** configuration in the configured VDOM.
+- Quarantine switches need **WiFi & Switch: Read/Write** access in the configured VDOM. FortiOS 7.6 reports `config user quarantine` under the API schema access group `wifi`, despite the CLI path beginning with `user`.
 - A combined installation needs both.
 
 FortiOS permission profiles normally cover a configuration area rather than one policy ID. Restrict the administrator's trusted hosts to the Home Assistant address, use the least-permissive profile that works on the installed FortiOS release, and keep the management interface private. Do not expose it to the Internet.
 
-Enable **User & Device: Read/Write** only when native quarantine control is required. Presence-only installations can leave quarantine disabled and keep read-only access. FortiOS permission profiles cannot normally restrict this write permission to one MAC address; Home Assistant therefore applies its own narrow target/MAC checks.
+Enable **WiFi & Switch: Read/Write** only when native quarantine control is required. Presence-only installations can keep **WiFi & Switch: Read**. FortiOS permission profiles cannot normally restrict this write permission to one MAC address; Home Assistant therefore applies its own narrow target/MAC checks.
 
 ## Policy switches
 
@@ -162,7 +162,7 @@ Use the integration's **Enable debug logging** menu, reproduce the problem, then
 - **TLS failure:** install the appropriate CA certificate; disable verification only for an isolated test.
 - **No clients:** confirm the FortiGate manages the FortiAPs and the administrator can read Wireless Controller monitor data.
 - **Unexpected duplicate Apple device:** select the MAC used by the intended SSID and use a stable private-address mode.
-- **Quarantine unavailable:** enable native host quarantine on FortiGate, confirm the firmware exposes `config user quarantine`, and grant the dedicated API administrator User & Device read/write access.
+- **Quarantine unavailable or HTTP 403:** enable native host quarantine on FortiGate, confirm the firmware exposes `config user quarantine`, and grant the dedicated API administrator **WiFi & Switch: Read/Write** access. On FortiOS 7.6, the endpoint schema identifies its permission group as `wifi`.
 - **Quarantine does not block same-VLAN traffic:** this is expected on bridged SSIDs when traffic remains at Layer 2.
 
 The FortiGate device also provides **Refresh data**, which performs an immediate read of enabled features without changing firewall configuration.

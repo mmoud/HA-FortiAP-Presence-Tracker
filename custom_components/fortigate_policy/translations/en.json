@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to FortiGate",
-        "description": "Choose what this connection should provide. For presence tracking only, leave policy IDs empty. Add policy IDs only when Home Assistant should expose those existing FortiGate rules as switches or control them from parental-control rules. The integration changes only each selected policy's enabled/disabled status.",
+        "description": "Choose what this connection should provide. For presence tracking only, leave policy IDs empty. Add policy IDs when Home Assistant should expose those existing FortiGate policies as verified switches. The integration changes only each selected policy's enabled/disabled status.",
         "data": {
           "host": "FortiGate hostname or IP address",
           "port": "HTTPS port",
@@ -18,7 +18,7 @@
       },
       "reconfigure": {
         "title": "Reconfigure FortiGate",
-        "description": "Policy control is optional. Leave policy IDs empty for presence tracking only; add IDs to create verified switches and allow parental-control rules to toggle those policies. Enter the API token again because its saved value is not shown.",
+        "description": "Policy control is optional. Leave policy IDs empty for presence tracking only, or add IDs to create verified switches for manual control and Home Assistant automations. Enter the API token again because its saved value is not shown.",
         "data": {
           "host": "FortiGate hostname or IP address",
           "port": "HTTPS port",
@@ -51,7 +51,6 @@
       "no_trackers": "There are no configured Wi-Fi trackers to remove.",
       "no_policies": "There are no configured firewall policies.",
       "no_presence_users": "There are no configured presence users.",
-      "no_policy_rules": "There are no configured policy rules.",
       "reauth_successful": "FortiGate policy token updated."
     }
   },
@@ -60,27 +59,20 @@
       "cannot_connect": "Cannot reach FortiGate, its TLS certificate could not be verified, or it returned unexpected JSON.",
       "invalid_auth": "FortiGate rejected the token or its permissions.",
       "not_found": "The Wi-Fi monitor endpoint, VDOM, or configured policy was not found.",
-      "rule_state_conflict": "A policy cannot be both enabled and disabled for the same presence state.",
       "select_at_least_one": "Select a discovered device or enter at least one valid MAC address.",
       "select_tracker_to_remove": "Select at least one tracker to remove.",
       "select_user_device": "Assign at least one tracked device to this user.",
       "select_presence_user_to_remove": "Select at least one user to remove.",
       "device_already_assigned": "One or more selected devices already belong to another user.",
-      "select_rule_user": "Select at least one user for this rule.",
-      "select_rule_policy": "Select at least one policy for this rule.",
-      "select_policy_rule_to_remove": "Select at least one rule to remove.",
-      "confirmation_required": "Review the rule and select the confirmation checkbox before saving.",
       "required": "This field is required."
     },
     "step": {
       "init": {
         "title": "FortiAP Presence Tracker",
-        "description": "Tracked devices: {tracked} · People: {users} · Parental-control rules: {rules} · Firewall policies: {policies}. Automatic enforcement: {automation}.",
+        "description": "Tracked devices: {tracked} · People: {users} · Firewall policy switches: {policies}.",
         "menu_options": {
-          "guided_parental_control": "Guided policy-based parental control",
           "people_devices": "People and devices",
-          "parental_controls": "Parental-control rules",
-          "firewall_policies": "Firewall policies",
+          "firewall_policies": "Firewall policy switches",
           "advanced_settings": "Advanced settings"
         }
       },
@@ -94,60 +86,16 @@
           "remove_wifi_trackers": "Remove tracked devices"
         }
       },
-      "parental_controls": {
-        "title": "Parental-control rules",
-        "description": "Manage behavior for {users} people using {rules} rules. Unknown presence never triggers an away action.",
-        "menu_options": {
-          "guided_parental_control": "Create a guided rule",
-          "policy_rules": "Manage existing rules"
-        }
-      },
       "advanced_settings": {
         "title": "Advanced settings",
-        "description": "Polling, away timing, dry-run mode, enforcement, overrides, retention, and diagnostic sensors.",
+        "description": "Polling, away timing, retention, and diagnostic sensors.",
         "menu_options": {
           "wifi_settings": "Polling, safety, and sensors"
         }
       },
-      "guided_person": {
-        "title": "Guided setup: person and devices",
-        "description": "Step 1 of 3. Name the person and select every device that should keep them home, such as a phone and watch.",
-        "data": {
-          "presence_user_name": "Person name",
-          "presence_user_macs": "Devices",
-          "user_away_grace_period": "Away grace period (seconds)"
-        }
-      },
-      "guided_policy_required": {
-        "title": "This guide creates a policy automation rule",
-        "description": "The guided parental-control workflow links a person's presence to an existing FortiGate firewall policy, so at least one policy must be configured. A policy ID tells Home Assistant exactly which existing rule it may enable or disable; the integration does not change that rule's addresses, services, action, schedule, NAT, interfaces, or order.\n\nIf you only need presence entities, choose Create presence-only people instead. No firewall policy is required.",
-        "menu_options": {
-          "firewall_policies": "Add firewall policy control",
-          "presence_users": "Create presence-only people"
-        }
-      },
-      "guided_existing_person": {
-        "title": "Guided setup: choose an existing person",
-        "description": "Step 1 of 3. Every tracked device is already assigned, so choose the existing person this new policy rule should follow. Their device assignments will not be changed.",
-        "data": {
-          "presence_user_id": "Person"
-        }
-      },
-      "guided_policy": {
-        "title": "Guided setup: policy behavior",
-        "description": "Step 2 of 3. This wizard creates an automatic link between the person's presence and existing firewall policies. Choose when it applies and whether those policies should be enabled or disabled. Only policy status is changed, and you will review the exact rule before saving.",
-        "data": {
-          "policy_rule_name": "Rule name",
-          "policy_rule_presence": "When the person is",
-          "policy_rule_action": "Policy action",
-          "policy_rule_policies": "Firewall policies",
-          "policy_rule_priority": "Priority",
-          "policy_rule_schedule": "Schedule (optional)"
-        }
-      },
       "firewall_policies": {
         "title": "Firewall policies",
-        "description": "Policy control is optional. Add numeric IDs of existing FortiGate policies to create verified switches and make them available to parental-control rules. Leave this empty for presence tracking only. The integration changes only policy status and verifies every ID before reloading.",
+        "description": "Policy control is optional. Add numeric IDs of existing FortiGate policies to create verified switches for manual control or Home Assistant automations. Leave this empty for presence tracking only. The integration changes only policy status and verifies every ID before reloading.",
         "data": {
           "policy_ids": "Firewall policy IDs (optional, comma-separated)"
         },
@@ -157,68 +105,12 @@
       },
       "presence_users": {
         "title": "Presence users",
-        "description": "Combine a user's phone, watch, or other Wi-Fi devices into one presence state. Configure firewall behavior separately under Policy automation rules.",
+        "description": "Combine a user's phone, watch, or other Wi-Fi devices into one presence state. Use the aggregate tracker in normal Home Assistant automations if desired.",
         "menu_options": {
           "add_presence_user": "Add user",
           "edit_presence_user": "Edit user",
           "remove_presence_users": "Remove users"
         }
-      },
-      "policy_rules": {
-        "title": "Policy automation rules",
-        "description": "Build prioritized rules from one or more presence users, with optional Home Assistant schedules.",
-        "menu_options": {
-          "add_policy_rule": "Add rule",
-          "edit_policy_rule": "Edit rule",
-          "remove_policy_rules": "Remove rules"
-        }
-      },
-      "edit_policy_rule": {
-        "title": "Edit policy rule",
-        "data": {"policy_rule_id": "Rule"}
-      },
-      "add_policy_rule": {
-        "title": "Add policy rule",
-        "description": "Choose the users, presence condition, resulting policy state, and priority.",
-        "data": {
-          "policy_rule_name": "Rule name",
-          "policy_rule_users": "Users",
-          "policy_rule_match": "User matching",
-          "policy_rule_presence": "Required presence",
-          "policy_rule_action": "Policy action",
-          "policy_rule_policies": "Policies",
-          "policy_rule_priority": "Priority",
-          "policy_rule_schedule": "Schedule (optional)"
-        }
-      },
-      "edit_policy_rule_details": {
-        "title": "Edit policy rule",
-        "description": "Changing a rule requires a preview before it is applied.",
-        "data": {
-          "policy_rule_name": "Rule name",
-          "policy_rule_users": "Users",
-          "policy_rule_match": "User matching",
-          "policy_rule_presence": "Required presence",
-          "policy_rule_action": "Policy action",
-          "policy_rule_policies": "Policies",
-          "policy_rule_priority": "Priority",
-          "policy_rule_schedule": "Schedule (optional)"
-        }
-      },
-      "policy_rule_preview": {
-        "title": "Confirm policy rule",
-        "description": "{name}: when {match} of {users} are {presence}, {action} policies {policies}. Priority: {priority}. Schedule: {schedule}. Current user states: {current_states}. Conflict check: {conflict}. Unknown required state blocks the write; equal-priority disable wins conflicts.",
-        "data": {"confirm": "I have reviewed this rule"}
-      },
-      "guided_policy_rule_preview": {
-        "title": "Guided setup: review and confirm",
-        "description": "Step 3 of 3. {name}: when {users} is {presence}, {action} policies {policies}. Priority: {priority}. Schedule: {schedule}. Conflict check: {conflict}. The person and rule are saved together only after confirmation. Unknown presence blocks the write.",
-        "data": {"confirm": "I have reviewed this rule"}
-      },
-      "remove_policy_rules": {
-        "title": "Remove policy rules",
-        "description": "Removing a rule stops future enforcement by that rule. It does not immediately change FortiGate.",
-        "data": {"policy_rules_to_remove": "Rules to remove"}
       },
       "edit_presence_user": {
         "title": "Edit presence user",
@@ -247,7 +139,7 @@
       },
       "remove_presence_users": {
         "title": "Remove presence users",
-        "description": "Removes the aggregate user trackers, presence sensors, and policy rules. Individual device trackers are not removed.",
+        "description": "Removes the aggregate user tracker and presence sensor. Individual device trackers are not removed.",
         "data": {
           "presence_users_to_remove": "Users to remove"
         }
@@ -261,11 +153,8 @@
           "network_track_fortiap_clients": "Track FortiAP network clients",
           "network_create_tracker_entities": "Create device tracker and network detail entities",
           "network_new_device_detection": "Detect new network devices and fire events",
-          "wifi_client_count_sensor": "Create Wi-Fi client count sensor"
-          ,"policy_automation_enabled": "Enable automatic policy enforcement"
-          ,"policy_automation_dry_run": "Dry run (calculate but do not write)"
-          ,"default_override_minutes": "Default manual override duration (minutes; 0 never expires)"
-          ,"recent_client_retention_days": "Recently seen device retention (days)"
+          "wifi_client_count_sensor": "Create Wi-Fi client count sensor",
+          "recent_client_retention_days": "Recently seen device retention (days)"
         }
       },
       "wifi_tracker_filters": {
@@ -325,19 +214,7 @@
         "name": "Presence"
       }
     },
-    "select": {
-      "policy_override": {
-        "name": "Policy automation override",
-        "state": {
-          "automatic": "Automatic",
-          "force_enable": "Force enabled",
-          "force_disable": "Force disabled",
-          "paused": "Paused"
-        }
-      }
-    },
     "sensor": {
-      "policy_decision": {"name": "Policy automation decision"},
       "ip_address": {"name": "IP address"},
       "connection_type": {"name": "Connection type"},
       "ssid": {"name": "SSID"},
@@ -350,33 +227,5 @@
       "unknown_network_devices": {"name": "Unknown network devices"}
     }
   },
-  "selector": {
-    "policy_rule_match": {
-      "options": {"any": "Any user", "all": "All users"}
-    },
-    "policy_rule_presence": {
-      "options": {"home": "Home", "away": "Away"}
-    },
-    "policy_rule_action": {
-      "options": {"enable": "Enable", "disable": "Disable"}
-    }
-  },
-  "issues": {
-    "policy_automation_failed": {
-      "title": "FortiGate policy automation is failing",
-      "description": "FortiAP Presence Tracker could not verify repeated policy automation updates. Check FortiGate reachability, API permissions, policy identity, and integration diagnostics. Automation will retry after new coordinator updates."
-    }
-  },
-  "services": {
-    "set_policy_override": {
-      "name": "Set policy automation override",
-      "description": "Force, pause, or restore automatic control for one rule-managed policy.",
-      "fields": {
-        "config_entry_id": {"name": "Config entry ID", "description": "The FortiAP Presence Tracker config entry ID."},
-        "policy_id": {"name": "Policy ID", "description": "A policy configured on this integration entry."},
-        "mode": {"name": "Mode", "description": "Automatic, forced enabled, forced disabled, or paused."},
-        "duration_minutes": {"name": "Duration", "description": "Minutes before returning to Automatic. Zero lasts until changed or Home Assistant restarts."}
-      }
-    }
-  }
+  "selector": {}
 }

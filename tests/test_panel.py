@@ -18,9 +18,6 @@ from custom_components.fortigate_policy.const import (
     CONF_API_TOKEN,
     CONF_FRIENDLY_NAME,
     CONF_POLICIES,
-    CONF_POLICY_AUTOMATION_DRY_RUN,
-    CONF_POLICY_AUTOMATION_ENABLED,
-    CONF_POLICY_RULES_V2,
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
@@ -111,25 +108,12 @@ def entry() -> SimpleNamespace:
                     CONF_PRESENCE_USER_MACS: [MAC],
                 }
             },
-            CONF_POLICY_RULES_V2: {
-                "rule-1": {
-                    "policy_rule_name": "Away rule",
-                    "policy_rule_users": ["person-1"],
-                    "policy_rule_match": "any",
-                    "policy_rule_presence": "away",
-                    "policy_rule_action": "disable",
-                    "policy_rule_policies": ["61"],
-                    "policy_rule_priority": 50,
-                    "policy_rule_schedule": "",
-                }
-            },
         },
         runtime_data=SimpleNamespace(
             wifi_coordinator=wifi,
             policy_coordinators={
                 "61": SimpleNamespace(data=Policy("61", "Family access", "enable"))
             },
-            rule_manager=None,
         ),
     )
 
@@ -233,7 +217,7 @@ class TestPanelFrontend(unittest.TestCase):
 class TestPanelValidation(unittest.TestCase):
     """Full-page saves preserve the same server-side safety boundaries."""
 
-    def test_normalizes_trackers_people_rules_and_settings(self) -> None:
+    def test_normalizes_trackers_people_and_settings(self) -> None:
         result = _normalize_configuration(
             entry(),
             [
@@ -251,24 +235,9 @@ class TestPanelValidation(unittest.TestCase):
                     "away_grace_period": 240,
                 }
             ],
-            [
-                {
-                    "id": "rule-1",
-                    "name": "Away rule",
-                    "users": ["person-1"],
-                    "match": "any",
-                    "presence": "away",
-                    "action": "disable",
-                    "policies": ["61"],
-                    "priority": 50,
-                    "schedule": "",
-                }
-            ],
             {
                 CONF_WIFI_TRACKING_ENABLED: True,
                 CONF_WIFI_CLIENT_COUNT_SENSOR: False,
-                CONF_POLICY_AUTOMATION_ENABLED: True,
-                CONF_POLICY_AUTOMATION_DRY_RUN: False,
             },
             (PolicyDefinition("61", "Family access"),),
         )
@@ -282,9 +251,6 @@ class TestPanelValidation(unittest.TestCase):
         self.assertEqual(
             240, result[CONF_PRESENCE_USERS]["person-1"]["user_away_grace_period"]
         )
-        self.assertEqual(
-            ["61"], result[CONF_POLICY_RULES_V2]["rule-1"]["policy_rule_policies"]
-        )
 
     def test_rejects_one_device_assigned_to_multiple_people(self) -> None:
         with self.assertRaisesRegex(ValueError, "only one person"):
@@ -295,12 +261,9 @@ class TestPanelValidation(unittest.TestCase):
                     {"id": "one", "name": "One", "macs": [MAC]},
                     {"id": "two", "name": "Two", "macs": [MAC]},
                 ],
-                [],
                 {
                     CONF_WIFI_TRACKING_ENABLED: True,
                     CONF_WIFI_CLIENT_COUNT_SENSOR: False,
-                    CONF_POLICY_AUTOMATION_ENABLED: True,
-                    CONF_POLICY_AUTOMATION_DRY_RUN: False,
                 },
                 (PolicyDefinition("61", "Family access"),),
             )

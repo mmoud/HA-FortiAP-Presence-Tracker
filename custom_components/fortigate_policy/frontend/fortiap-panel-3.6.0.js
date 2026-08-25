@@ -118,7 +118,6 @@ class FortiApPresencePanel extends HTMLElement {
             allowed_ssids: tracker.allowed_ssids || [],
           })),
           users: this._draft.users,
-          rules: this._draft.rules,
           policy_ids: this._draft.policies.map((policy) => policy.id),
           settings: this._draft.settings,
         },
@@ -238,9 +237,6 @@ class FortiApPresencePanel extends HTMLElement {
     if (name === "remove-person") {
       const id = action.dataset.id;
       this._draft.users = this._draft.users.filter((item) => item.id !== id);
-      this._draft.rules.forEach((rule) => {
-        rule.users = rule.users.filter((item) => item !== id);
-      });
     }
     if (name === "toggle-person-device") {
       const user = this._draft.users.find((item) => item.id === action.dataset.id);
@@ -267,35 +263,6 @@ class FortiApPresencePanel extends HTMLElement {
     if (name === "remove-policy") {
       const id = action.dataset.id;
       this._draft.policies = this._draft.policies.filter((item) => item.id !== id);
-      this._draft.rules.forEach((rule) => {
-        rule.policies = rule.policies.filter((item) => item !== id);
-      });
-    }
-    if (name === "add-rule") {
-      this._draft.rules.push({
-        id: uid("rule"),
-        name: "New rule",
-        users: [],
-        match: "any",
-        presence: "away",
-        action: "disable",
-        policies: [],
-        priority: 50,
-        schedule: "",
-      });
-    }
-    if (name === "remove-rule") {
-      this._draft.rules = this._draft.rules.filter((item) => item.id !== action.dataset.id);
-    }
-    if (name === "toggle-rule-list") {
-      const rule = this._draft.rules.find((item) => item.id === action.dataset.id);
-      const field = action.dataset.field;
-      const value = action.dataset.value;
-      if (rule) {
-        rule[field] = event.target.checked
-          ? [...new Set([...rule[field], value])]
-          : rule[field].filter((item) => item !== value);
-      }
     }
     this._render();
   }
@@ -328,7 +295,6 @@ class FortiApPresencePanel extends HTMLElement {
     return `<div class="grid">
       ${this._metric("Tracked devices", d.trackers.length, `${health.known_network_devices || 0} known · ${health.connected_network_devices ?? "–"} connected`, "cellphone-link", "blue")}
       ${this._metric("People", d.users.length, "Multi-device presence groups", "account-group", "green")}
-      ${this._metric("Policy rules", d.rules.length, "Unknown state blocks writes", "source-branch", "purple")}
       ${this._metric("Firewall policies", d.policies.length, "Status-only verified control", "shield-check", "orange")}
       <section class="card span-6"><div class="section-head"><div class="section-title"><span class="section-icon">${this._icon("router-wireless")}</span><div><h2>Connection</h2><div class="muted">FortiGate management path</div></div></div><span class="status ${health.wifi_available ? "ok" : "unavailable"}">${this._icon(health.wifi_available ? "check-circle" : "alert-circle")}${health.wifi_available ? "Wi-Fi API available" : "Wi-Fi API unavailable"}</span></div>
         <div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(d.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(d.connection.vdom)}</strong></div><div><div class="muted">HTTPS port</div><strong>${escapeHtml(d.connection.port)}</strong></div><div><div class="muted">FortiOS</div><strong>${escapeHtml(health.fortios_version || "Unknown")}</strong></div></div>
@@ -339,7 +305,7 @@ class FortiApPresencePanel extends HTMLElement {
   }
 
   _metric(title, value, detail, icon, tone) {
-    return `<section class="card span-3 metric-card ${escapeHtml(tone)}"><span class="metric-icon">${this._icon(icon)}</span><div><div class="metric-label">${escapeHtml(title)}</div><div class="metric">${escapeHtml(value)}</div><div class="metric-detail">${escapeHtml(detail)}</div></div></section>`;
+    return `<section class="card span-4 metric-card ${escapeHtml(tone)}"><span class="metric-icon">${this._icon(icon)}</span><div><div class="metric-label">${escapeHtml(title)}</div><div class="metric">${escapeHtml(value)}</div><div class="metric-detail">${escapeHtml(detail)}</div></div></section>`;
   }
 
   _icon(name) {
@@ -374,8 +340,7 @@ class FortiApPresencePanel extends HTMLElement {
   }
 
   _policies() {
-    return `<div class="grid"><section class="card"><div class="section-head"><div><h2>Firewall policies</h2><div class="muted">Add IDs here, then enable or disable verified policies directly from the dashboard.</div></div><div class="row add-row"><label class="field-label">Policy ID<input class="editable" id="new-policy-id" inputmode="numeric" placeholder="For example, 61"></label><button class="btn track" data-action="add-policy">Add policy</button></div></div>${this._draft.policies.length ? `<table class="mobile-table"><thead><tr><th>Status</th><th>ID</th><th>Verified policy name</th><th>Control</th><th></th></tr></thead><tbody>${this._draft.policies.map((policy) => `<tr><td data-label="Status"><span class="status ${escapeHtml(policy.state)}">${escapeHtml(policy.state)}</span></td><td data-label="Policy ID" class="mono">${escapeHtml(policy.id)}</td><td data-label="Policy name">${escapeHtml(policy.name)}</td><td data-label="Control">${this._policyAction(policy)}</td><td class="right mobile-actions"><button class="btn remove" data-action="remove-policy" data-id="${escapeHtml(policy.id)}">Remove</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">Tracker-only mode. No firewall policy control is configured.</div>`}</section>
-      <section class="card"><div class="section-head"><div><h2>Presence policy rules</h2><div class="muted">Rules are evaluated centrally; unknown presence never performs an away action</div></div><button class="btn track" data-action="add-rule" ${!this._draft.users.length || !this._draft.policies.length ? "disabled" : ""}>Add rule</button></div><div class="stack">${this._draft.rules.map((rule, index) => this._ruleEditor(rule, index)).join("") || `<div class="empty">No policy rules configured.</div>`}</div></section></div>`;
+    return `<div class="grid"><section class="card"><div class="section-head"><div><h2>Firewall policies</h2><div class="muted">Add IDs here, then enable or disable verified policies directly from the dashboard. Use Home Assistant automations to connect presence, schedules, or other conditions to these switches.</div></div><div class="row add-row"><label class="field-label">Policy ID<input class="editable" id="new-policy-id" inputmode="numeric" placeholder="For example, 61"></label><button class="btn track" data-action="add-policy">Add policy</button></div></div>${this._draft.policies.length ? `<table class="mobile-table"><thead><tr><th>Status</th><th>ID</th><th>Verified policy name</th><th>Control</th><th></th></tr></thead><tbody>${this._draft.policies.map((policy) => `<tr><td data-label="Status"><span class="status ${escapeHtml(policy.state)}">${escapeHtml(policy.state)}</span></td><td data-label="Policy ID" class="mono">${escapeHtml(policy.id)}</td><td data-label="Policy name">${escapeHtml(policy.name)}</td><td data-label="Control">${this._policyAction(policy)}</td><td class="right mobile-actions"><button class="btn remove" data-action="remove-policy" data-id="${escapeHtml(policy.id)}">Remove</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">Tracker-only mode. No firewall policy control is configured.</div>`}</section></div>`;
   }
 
   _policyAction(policy) {
@@ -389,15 +354,11 @@ class FortiApPresencePanel extends HTMLElement {
     return `<button class="btn ${tone} policy-action" data-action="set-policy" data-id="${escapeHtml(policy.id)}" data-status="${desired}" ${busy ? 'disabled' : ''}>${label}</button>`;
   }
 
-  _ruleEditor(rule, index) {
-    return `<div class="rule"><div class="section-head"><label class="field-label grow">Rule name<input class="editable" data-model="rules.${index}.name" value="${escapeHtml(rule.name)}" aria-label="Rule name"></label><button class="btn remove" data-action="remove-rule" data-id="${escapeHtml(rule.id)}">Remove</button></div><div class="form-grid"><label>User matching<select data-model="rules.${index}.match"><option value="any" ${rule.match === "any" ? "selected" : ""}>Any selected person</option><option value="all" ${rule.match === "all" ? "selected" : ""}>All selected people</option></select></label><label>Required presence<select data-model="rules.${index}.presence"><option value="home" ${rule.presence === "home" ? "selected" : ""}>Home</option><option value="away" ${rule.presence === "away" ? "selected" : ""}>Away</option></select></label><label>Policy action<select data-model="rules.${index}.action"><option value="enable" ${rule.action === "enable" ? "selected" : ""}>Enable</option><option value="disable" ${rule.action === "disable" ? "selected" : ""}>Disable</option></select></label><label>Priority<input type="number" min="0" max="100" data-kind="number" data-model="rules.${index}.priority" value="${escapeHtml(rule.priority)}"></label></div><div class="form-grid" style="margin-top:14px"><div><div class="muted">People</div><div class="checks">${this._draft.users.map((user) => `<label><input type="checkbox" data-action="toggle-rule-list" data-id="${escapeHtml(rule.id)}" data-field="users" data-value="${escapeHtml(user.id)}" ${rule.users.includes(user.id) ? "checked" : ""}>${escapeHtml(user.name)}</label>`).join("")}</div></div><div><div class="muted">Policies</div><div class="checks">${this._draft.policies.map((policy) => `<label><input type="checkbox" data-action="toggle-rule-list" data-id="${escapeHtml(rule.id)}" data-field="policies" data-value="${escapeHtml(policy.id)}" ${rule.policies.includes(policy.id) ? "checked" : ""}>${escapeHtml(policy.id)}</label>`).join("")}</div></div><label style="grid-column:span 2">Schedule entity (optional)<input data-model="rules.${index}.schedule" value="${escapeHtml(rule.schedule || "")}" placeholder="schedule.school_hours"></label></div></div>`;
-  }
-
   _settings() {
     const s = this._draft.settings;
     const number = (key, title, min, max) => `<label>${escapeHtml(title)}<input type="number" min="${min}" max="${max}" data-kind="number" data-model="settings.${key}.${key}" value="${escapeHtml(s[key])}"></label>`;
     const toggle = (key, title, detail) => `<label class="toggle"><input type="checkbox" data-model="settings.${key}.${key}" ${s[key] ? "checked" : ""}><span><strong>${escapeHtml(title)}</strong><br><span class="muted">${escapeHtml(detail)}</span></span></label>`;
-    return `<div class="grid"><section class="card span-6"><h2>Network Device Presence+</h2><div class="stack" style="margin-top:16px">${toggle("wifi_tracking_enabled", "Enable network device tracking", "Runs the shared network presence coordinator")}${toggle("network_track_fortiap_clients", "Track FortiAP clients", "Uses the FortiGate associated-client monitor as the network data provider")}${toggle("network_create_tracker_entities", "Create device entities", "Creates a tracker, connected sensor, and compact network details for selected devices")}${toggle("network_new_device_detection", "Detect new devices", "Fires fortigate_new_network_device once for a newly observed MAC")}${toggle("wifi_client_count_sensor", "Wi-Fi client count sensor", "Creates an optional associated-client count sensor")}<div class="form-grid">${number("wifi_poll_interval", "Network polling interval (seconds)", 15, 120)}${number("wifi_away_grace_period", "Away timeout (seconds)", 30, 3600)}${number("recent_client_retention_days", "Device history retention (days)", 1, 365)}</div></div></section><section class="card span-6"><h2>Policy control</h2><div class="stack" style="margin-top:16px">${toggle("policy_automation_enabled", "Automatic policy enforcement", "Applies configured rules after valid coordinator updates")}${toggle("policy_automation_dry_run", "Dry run", "Calculates decisions without writing to FortiGate")}<div class="form-grid">${number("poll_interval", "Policy polling interval (seconds)", 30, 3600)}${number("default_override_minutes", "Override duration (minutes)", 0, 1440)}</div></div></section><section class="card"><h2>Connection settings</h2><p class="muted">Host, VDOM, token, port, and TLS trust remain in Home Assistant's Reconfigure flow because they are connection credentials rather than operational settings.</p><div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(this._draft.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(this._draft.connection.vdom)}</strong></div><div><div class="muted">Port</div><strong>${escapeHtml(this._draft.connection.port)}</strong></div><div><div class="muted">TLS verification</div><strong>${this._draft.connection.verify_ssl ? "Enabled" : "Disabled"}</strong></div></div></section></div>`;
+    return `<div class="grid"><section class="card span-6"><h2>Network Device Presence+</h2><div class="stack" style="margin-top:16px">${toggle("wifi_tracking_enabled", "Enable network device tracking", "Runs the shared network presence coordinator")}${toggle("network_track_fortiap_clients", "Track FortiAP clients", "Uses the FortiGate associated-client monitor as the network data provider")}${toggle("network_create_tracker_entities", "Create device entities", "Creates a tracker, connected sensor, and compact network details for selected devices")}${toggle("network_new_device_detection", "Detect new devices", "Fires fortigate_new_network_device once for a newly observed MAC")}${toggle("wifi_client_count_sensor", "Wi-Fi client count sensor", "Creates an optional associated-client count sensor")}<div class="form-grid">${number("wifi_poll_interval", "Network polling interval (seconds)", 15, 120)}${number("wifi_away_grace_period", "Away timeout (seconds)", 30, 3600)}${number("recent_client_retention_days", "Device history retention (days)", 1, 365)}</div></div></section><section class="card span-6"><h2>Policy switches</h2><p class="muted">The integration polls each configured policy and exposes a verified Home Assistant switch. Presence and schedule behavior is configured with Home Assistant automations.</p><div class="form-grid">${number("poll_interval", "Policy polling interval (seconds)", 30, 3600)}</div></section><section class="card"><h2>Connection settings</h2><p class="muted">Host, VDOM, token, port, and TLS trust remain in Home Assistant's Reconfigure flow because they are connection credentials rather than operational settings.</p><div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(this._draft.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(this._draft.connection.vdom)}</strong></div><div><div class="muted">Port</div><strong>${escapeHtml(this._draft.connection.port)}</strong></div><div><div class="muted">TLS verification</div><strong>${this._draft.connection.verify_ssl ? "Enabled" : "Disabled"}</strong></div></div></section></div>`;
   }
 
   _trackerName(mac) {
@@ -421,7 +382,7 @@ class FortiApPresencePanel extends HTMLElement {
       policies: this._policies(),
       settings: this._settings(),
     };
-    const tabs = [["overview","Overview","view-dashboard-outline"],["people","People","account-multiple-outline"],["devices","Devices","cellphone-link"],["policies","Policies & rules","shield-account-outline"],["settings","Settings","cog-outline"]];
+    const tabs = [["overview","Overview","view-dashboard-outline"],["people","People","account-multiple-outline"],["devices","Devices","cellphone-link"],["policies","Policy switches","shield-check"],["settings","Settings","cog-outline"]];
     this.shadowRoot.innerHTML = `${this._styles()}<div class="shell"><header class="top"><div class="brand"><span class="brand-mark">${this._icon("access-point-network")}</span><div><div class="eyebrow">FortiAP Presence Tracker ${escapeHtml(this._draft.version)}</div><h1>Wireless presence and policy control</h1><div class="muted">${escapeHtml(this._draft.title)} · ${escapeHtml(this._draft.connection.vdom)} VDOM</div></div></div><div class="row">${this._entries.length > 1 ? `<select data-action="entry-select">${this._entries.map((entry) => `<option value="${escapeHtml(entry.entry_id)}" ${entry.entry_id === this._draft.entry_id ? "selected" : ""}>${escapeHtml(entry.title)}</option>`).join("")}</select>` : ""}<a class="btn home" href="/home" aria-label="Back to Home Assistant overview">${this._icon("home-assistant")}Home Assistant</a><button class="btn refresh" data-action="reload">${this._icon("refresh")}Refresh</button></div></header>${this._error ? `<div class="notice error">${escapeHtml(this._error)}</div>` : ""}${this._notice ? `<div class="notice">${escapeHtml(this._notice)}</div>` : ""}<nav class="tabs" aria-label="FortiAP Presence sections">${tabs.map(([key,label,icon]) => `<button class="tab ${this._tab === key ? "active" : ""}" data-action="tab" data-tab="${key}" ${this._tab === key ? 'aria-current="page"' : ""}>${this._icon(icon)}${label}</button>`).join("")}</nav>${views[this._tab]}</div><div class="savebar"><div class="save-inner"><div class="save-note">${this._icon("content-save-check-outline")}<div><strong>Review changes before saving</strong><div class="muted">Policy IDs are verified and the integration reloads atomically.</div></div></div><button class="btn save" data-action="save" ${this._saving ? "disabled" : ""}>${this._icon("content-save-outline")}${this._saving ? "Saving…" : "Save changes"}</button></div></div>`;
     this.shadowRoot.querySelectorAll("[data-action]").forEach((element) => {
       element.onclick = (event) => this._handleClick(event);

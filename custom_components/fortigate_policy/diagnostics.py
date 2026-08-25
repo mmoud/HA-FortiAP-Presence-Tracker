@@ -11,12 +11,9 @@ from . import FortiGatePolicyConfigEntry
 from .const import (
     CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
-    CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_NETWORK_CREATE_TRACKER_ENTITIES,
     CONF_NETWORK_NEW_DEVICE_DETECTION,
     CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
-    CONF_POLICY_AUTOMATION_DRY_RUN,
-    CONF_POLICY_AUTOMATION_ENABLED,
     CONF_TRACKED_CLIENTS,
     CONF_WIFI_AWAY_GRACE_PERIOD,
     CONF_WIFI_POLL_INTERVAL,
@@ -35,7 +32,6 @@ async def async_get_config_entry_diagnostics(
     """Return useful aggregate Wi-Fi diagnostics without client identities."""
     runtime = entry.runtime_data
     wifi = runtime.wifi_coordinator
-    rule_manager = runtime.rule_manager
     tracked = entry.options.get(CONF_TRACKED_CLIENTS, {})
     tracked_macs = {
         normalized
@@ -163,40 +159,9 @@ async def async_get_config_entry_diagnostics(
                     "new_device_event": "fortigate_new_network_device",
                 },
             },
-            "presence_policy_rules": {
+            "presence_groups": {
                 "configured_user_count": len(presence_users),
                 "assigned_device_count": sum(len(user.macs) for user in presence_users),
-                "configured_rule_count": (
-                    len(rule_manager.rules) + len(rule_manager.policy_rules)
-                    if rule_manager
-                    else 0
-                ),
-                "automation_enabled": entry.options.get(
-                    CONF_POLICY_AUTOMATION_ENABLED, True
-                ),
-                "dry_run": entry.options.get(CONF_POLICY_AUTOMATION_DRY_RUN, False),
-                "default_override_minutes": entry.options.get(
-                    CONF_DEFAULT_OVERRIDE_MINUTES, 60
-                ),
-                "active_override_count": (
-                    len(rule_manager.overrides) if rule_manager else 0
-                ),
-                "last_reconcile": (
-                    rule_manager.last_reconcile.isoformat()
-                    if rule_manager and rule_manager.last_reconcile
-                    else None
-                ),
-                "blocked_policy_count": (
-                    len(rule_manager.last_result.blocked_unknown)
-                    if rule_manager and rule_manager.last_result
-                    else 0
-                ),
-                "conflict_policy_count": (
-                    len(rule_manager.last_result.conflicts)
-                    if rule_manager and rule_manager.last_result
-                    else 0
-                ),
-                "last_error": rule_manager.last_error if rule_manager else None,
             },
         },
         TO_REDACT,

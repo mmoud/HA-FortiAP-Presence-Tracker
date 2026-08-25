@@ -42,19 +42,7 @@ from custom_components.fortigate_policy.const import (
     CONF_NETWORK_NEW_DEVICE_DETECTION,
     CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICIES,
-    CONF_POLICY_AUTOMATION_DRY_RUN,
-    CONF_POLICY_AUTOMATION_ENABLED,
     CONF_POLICY_IDS,
-    CONF_POLICY_RULE_ACTION,
-    CONF_POLICY_RULE_MATCH,
-    CONF_POLICY_RULE_NAME,
-    CONF_POLICY_RULE_POLICIES,
-    CONF_POLICY_RULE_PRESENCE,
-    CONF_POLICY_RULE_PRIORITY,
-    CONF_POLICY_RULE_SCHEDULE,
-    CONF_POLICY_RULE_USERS,
-    CONF_POLICY_RULES_V2,
-    CONF_PRESENCE_USER_ID,
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
@@ -62,9 +50,6 @@ from custom_components.fortigate_policy.const import (
     CONF_USER_AWAY_GRACE_PERIOD,
     CONF_VDOM,
     CONF_VERIFY_SSL,
-    RULE_MATCH_ANY,
-    RULE_PRESENCE_AWAY,
-    STATUS_DISABLE,
 )
 from custom_components.fortigate_policy.presence_users import PresenceUser
 from custom_components.fortigate_policy.switch import FortiGatePolicySwitch
@@ -142,10 +127,6 @@ class TestPresenceBinarySensor(unittest.TestCase):
             "stable-user-id",
             "Example user",
             frozenset({MAC, second_mac}),
-            frozenset(),
-            frozenset(),
-            frozenset(),
-            frozenset(),
         )
         entity = FortiGatePresenceUserBinarySensor(
             SimpleNamespace(entry_id="entry-1"),  # type: ignore[arg-type]
@@ -313,9 +294,6 @@ class TestPolicyOptions(unittest.TestCase):
             {
                 CONF_TRACKED_CLIENTS: {MAC: {}, "11:22:33:44:55:66": {}},
                 CONF_PRESENCE_USERS: {"person-1": {}},
-                CONF_POLICY_RULES_V2: {"rule-1": {}, "rule-2": {}},
-                CONF_POLICY_AUTOMATION_ENABLED: True,
-                CONF_POLICY_AUTOMATION_DRY_RUN: True,
             },
         )
 
@@ -323,22 +301,11 @@ class TestPolicyOptions(unittest.TestCase):
             {
                 "tracked": "2",
                 "users": "1",
-                "rules": "2",
                 "policies": "2",
-                "automation": "Dry run",
             },
             summary,
         )
         self.assertNotIn("must-not-appear", str(summary))
-
-    def test_configuration_hub_reports_disabled_enforcement(self) -> None:
-        self.assertEqual(
-            "Off",
-            _options_hub_summary(
-                {CONF_POLICIES: []},
-                {CONF_POLICY_AUTOMATION_ENABLED: False},
-            )["automation"],
-        )
 
     def test_configuration_hub_uses_task_centered_menu(self) -> None:
         flow = self._options_flow(SimpleNamespace(data={CONF_POLICIES: []}, options={}))
@@ -347,48 +314,11 @@ class TestPolicyOptions(unittest.TestCase):
 
         self.assertEqual(
             [
-                "guided_parental_control",
                 "people_devices",
-                "parental_controls",
                 "firewall_policies",
                 "advanced_settings",
             ],
             result["menu_options"],
-        )
-
-    def test_guided_setup_offers_only_unassigned_devices(self) -> None:
-        second_mac = "11:22:33:44:55:66"
-        flow = self._options_flow(
-            SimpleNamespace(
-                data={CONF_POLICIES: []},
-                options={
-                    CONF_TRACKED_CLIENTS: {
-                        MAC: {CONF_FRIENDLY_NAME: "Assigned phone"},
-                        second_mac: {CONF_FRIENDLY_NAME: "New watch"},
-                    },
-                    CONF_PRESENCE_USERS: {"person-1": {CONF_PRESENCE_USER_MACS: [MAC]}},
-                },
-            )
-        )
-
-        self.assertEqual(
-            [{"value": second_mac, "label": f"New watch ({second_mac})"}],
-            flow._unassigned_tracker_options(),
-        )
-
-    def test_guided_setup_explains_policy_requirement(self) -> None:
-        flow = self._options_flow(
-            SimpleNamespace(
-                data={CONF_POLICIES: []},
-                options={CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}}},
-            )
-        )
-
-        result = asyncio.run(flow.async_step_guided_parental_control())
-
-        self.assertEqual("guided_policy_required", result["step_id"])
-        self.assertEqual(
-            ["firewall_policies", "presence_users"], result["menu_options"]
         )
 
     def test_people_overview_lists_people_and_friendly_device_names(self) -> None:
@@ -474,82 +404,6 @@ class TestPolicyOptions(unittest.TestCase):
             result["data"][CONF_TRACKED_CLIENTS][MAC][CONF_ALLOWED_SSIDS],
         )
 
-    def test_guided_setup_uses_existing_person_when_all_devices_assigned(self) -> None:
-        entry = SimpleNamespace(
-            data={CONF_POLICIES: [{"policy_id": "61", "policy_name": "Access"}]},
-            options={
-                CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}},
-                CONF_PRESENCE_USERS: {
-                    "person-1": {
-                        CONF_PRESENCE_USER_NAME: "Example person",
-                        CONF_PRESENCE_USER_MACS: [MAC],
-                    }
-                },
-            },
-        )
-        flow = self._options_flow(entry)
-
-        choose_result = asyncio.run(flow.async_step_guided_parental_control())
-        self.assertEqual("guided_existing_person", choose_result["step_id"])
-
-        policy_result = asyncio.run(
-            flow.async_step_guided_existing_person({CONF_PRESENCE_USER_ID: "person-1"})
-        )
-        self.assertEqual("guided_policy", policy_result["step_id"])
-        defaults = policy_result["data_schema"]({CONF_POLICY_RULE_POLICIES: ["61"]})
-        self.assertEqual("Example person policy", defaults[CONF_POLICY_RULE_NAME])
-        self.assertEqual({"person-1"}, set(entry.options[CONF_PRESENCE_USERS]))
-
-    def test_guided_setup_saves_person_and_rule_only_after_confirmation(self) -> None:
-        entry = SimpleNamespace(
-            data={CONF_POLICIES: [{"policy_id": "61", "policy_name": "Family access"}]},
-            options={CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}}},
-        )
-        flow = self._options_flow(entry)
-
-        person_result = asyncio.run(flow.async_step_guided_parental_control())
-        self.assertEqual("guided_person", person_result["step_id"])
-        policy_result = asyncio.run(
-            flow.async_step_guided_person(
-                {
-                    CONF_PRESENCE_USER_NAME: "Example person",
-                    CONF_PRESENCE_USER_MACS: [MAC],
-                    CONF_USER_AWAY_GRACE_PERIOD: 180,
-                }
-            )
-        )
-        self.assertEqual("guided_policy", policy_result["step_id"])
-        preview_result = asyncio.run(
-            flow.async_step_guided_policy(
-                {
-                    CONF_POLICY_RULE_NAME: "Away rule",
-                    CONF_POLICY_RULE_PRESENCE: RULE_PRESENCE_AWAY,
-                    CONF_POLICY_RULE_ACTION: STATUS_DISABLE,
-                    CONF_POLICY_RULE_POLICIES: ["61"],
-                    CONF_POLICY_RULE_PRIORITY: 50,
-                    CONF_POLICY_RULE_SCHEDULE: "",
-                }
-            )
-        )
-        self.assertEqual("guided_policy_rule_preview", preview_result["step_id"])
-        self.assertNotIn(CONF_PRESENCE_USERS, entry.options)
-
-        result = asyncio.run(
-            flow.async_step_guided_policy_rule_preview({"confirm": True})
-        )
-        saved_users = result["data"][CONF_PRESENCE_USERS]
-        saved_rules = result["data"][CONF_POLICY_RULES_V2]
-        self.assertEqual(1, len(saved_users))
-        self.assertEqual(1, len(saved_rules))
-        user_id, user = next(iter(saved_users.items()))
-        rule = next(iter(saved_rules.values()))
-        self.assertEqual("Example person", user[CONF_PRESENCE_USER_NAME])
-        self.assertEqual([MAC], user[CONF_PRESENCE_USER_MACS])
-        self.assertEqual([user_id], rule[CONF_POLICY_RULE_USERS])
-        self.assertEqual(RULE_MATCH_ANY, rule[CONF_POLICY_RULE_MATCH])
-        self.assertEqual(STATUS_DISABLE, rule[CONF_POLICY_RULE_ACTION])
-        self.assertEqual(["61"], rule[CONF_POLICY_RULE_POLICIES])
-
     def test_policy_form_defaults_to_all_configured_ids(self) -> None:
         schema = _policy_options_schema(
             {
@@ -605,11 +459,50 @@ class TestPolicyOptions(unittest.TestCase):
 
         self.assertTrue(asyncio.run(async_migrate_entry(hass, entry)))
         migrated = updates[-1]
-        self.assertEqual(7, migrated["version"])
+        self.assertEqual(8, migrated["version"])
         self.assertEqual(180, migrated["options"]["wifi_away_grace_period"])
         self.assertTrue(migrated["options"][CONF_NETWORK_TRACK_FORTIAP_CLIENTS])
         self.assertTrue(migrated["options"][CONF_NETWORK_CREATE_TRACKER_ENTITIES])
         self.assertTrue(migrated["options"][CONF_NETWORK_NEW_DEVICE_DETECTION])
+
+    def test_version_eight_migration_removes_internal_policy_automation(self) -> None:
+        updates = []
+        hass = SimpleNamespace(
+            config_entries=SimpleNamespace(
+                async_update_entry=lambda _entry, **values: updates.append(values)
+            )
+        )
+        entry = SimpleNamespace(
+            version=7,
+            data={CONF_POLICIES: [{"policy_id": "61", "policy_name": "Access"}]},
+            options={
+                CONF_TRACKED_CLIENTS: {MAC: {CONF_FRIENDLY_NAME: "Phone"}},
+                CONF_PRESENCE_USERS: {
+                    "person-1": {
+                        CONF_PRESENCE_USER_NAME: "Example person",
+                        CONF_PRESENCE_USER_MACS: [MAC],
+                    }
+                },
+                "policy_rules_v2": {"old-rule": {}},
+                "policy_automation_enabled": True,
+                "policy_automation_dry_run": True,
+                "default_override_minutes": 60,
+            },
+        )
+
+        self.assertTrue(asyncio.run(async_migrate_entry(hass, entry)))
+        migrated = updates[-1]
+        self.assertEqual(8, migrated["version"])
+        self.assertEqual(
+            [MAC],
+            migrated["options"][CONF_PRESENCE_USERS]["person-1"][
+                CONF_PRESENCE_USER_MACS
+            ],
+        )
+        self.assertNotIn("policy_rules_v2", migrated["options"])
+        self.assertNotIn("policy_automation_enabled", migrated["options"])
+        self.assertNotIn("policy_automation_dry_run", migrated["options"])
+        self.assertNotIn("default_override_minutes", migrated["options"])
 
 
 class TestPolicySwitchEntities(unittest.TestCase):

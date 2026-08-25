@@ -8,11 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from .const import (
-    CONF_AWAY_DISABLE_POLICIES,
-    CONF_AWAY_ENABLE_POLICIES,
     CONF_FRIENDLY_NAME,
-    CONF_HOME_DISABLE_POLICIES,
-    CONF_HOME_ENABLE_POLICIES,
     CONF_PRESENCE_POLICY_RULES,
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
@@ -24,13 +20,6 @@ from .const import (
 )
 from .wifi import WifiPresence, normalize_mac
 
-RULE_FIELDS = (
-    CONF_HOME_ENABLE_POLICIES,
-    CONF_HOME_DISABLE_POLICIES,
-    CONF_AWAY_ENABLE_POLICIES,
-    CONF_AWAY_DISABLE_POLICIES,
-)
-
 
 @dataclass(frozen=True, slots=True)
 class PresenceUser:
@@ -39,27 +28,7 @@ class PresenceUser:
     user_id: str
     name: str
     macs: frozenset[str]
-    home_enable: frozenset[str]
-    home_disable: frozenset[str]
-    away_enable: frozenset[str]
-    away_disable: frozenset[str]
     away_grace_period: int = DEFAULT_USER_AWAY_GRACE_PERIOD
-
-    @property
-    def affected_policies(self) -> frozenset[str]:
-        """Return every policy whose state may depend on this user."""
-        return frozenset().union(
-            self.home_enable,
-            self.home_disable,
-            self.away_enable,
-            self.away_disable,
-        )
-
-    def intents_for(self, is_home: bool) -> tuple[frozenset[str], frozenset[str]]:
-        """Return enable and disable intents for a known aggregate state."""
-        if is_home:
-            return self.home_enable, self.home_disable
-        return self.away_enable, self.away_disable
 
 
 def aggregate_presence(
@@ -88,14 +57,6 @@ def aggregate_presence(
     return None
 
 
-def _policy_set(value: object, valid_policy_ids: set[str]) -> frozenset[str]:
-    if not isinstance(value, list):
-        return frozenset()
-    return frozenset(
-        str(policy_id) for policy_id in value if str(policy_id) in valid_policy_ids
-    )
-
-
 def _away_grace(value: object) -> int:
     try:
         seconds = int(value)
@@ -109,7 +70,10 @@ def configured_presence_users(
     tracked_macs: set[str],
     valid_policy_ids: set[str],
 ) -> tuple[PresenceUser, ...]:
-    """Parse valid profiles, pruning stale devices and policy references."""
+    """Parse valid profiles and prune stale device references."""
+    del (
+        valid_policy_ids
+    )  # Retained in the signature for config-entry migration callers.
     raw_users = options.get(CONF_PRESENCE_USERS, {})
     if not isinstance(raw_users, Mapping):
         return ()
@@ -138,18 +102,6 @@ def configured_presence_users(
                 user_id=raw_id,
                 name=name.strip(),
                 macs=macs,
-                home_enable=_policy_set(
-                    raw_user.get(CONF_HOME_ENABLE_POLICIES), valid_policy_ids
-                ),
-                home_disable=_policy_set(
-                    raw_user.get(CONF_HOME_DISABLE_POLICIES), valid_policy_ids
-                ),
-                away_enable=_policy_set(
-                    raw_user.get(CONF_AWAY_ENABLE_POLICIES), valid_policy_ids
-                ),
-                away_disable=_policy_set(
-                    raw_user.get(CONF_AWAY_DISABLE_POLICIES), valid_policy_ids
-                ),
                 away_grace_period=_away_grace(
                     raw_user.get(
                         CONF_USER_AWAY_GRACE_PERIOD,
@@ -174,10 +126,6 @@ def serialize_presence_users(
         user.user_id: {
             CONF_PRESENCE_USER_NAME: user.name,
             CONF_PRESENCE_USER_MACS: sorted(user.macs),
-            CONF_HOME_ENABLE_POLICIES: sorted(user.home_enable),
-            CONF_HOME_DISABLE_POLICIES: sorted(user.home_disable),
-            CONF_AWAY_ENABLE_POLICIES: sorted(user.away_enable),
-            CONF_AWAY_DISABLE_POLICIES: sorted(user.away_disable),
             CONF_USER_AWAY_GRACE_PERIOD: user.away_grace_period,
         }
         for user in parsed
@@ -208,11 +156,6 @@ def migrate_tracker_rules_to_users(
                 else mac
             ),
             CONF_PRESENCE_USER_MACS: [mac],
-            **{
-                field: list(raw_rule.get(field, []))
-                if isinstance(raw_rule.get(field), list)
-                else []
-                for field in RULE_FIELDS
-            },
+            CONF_USER_AWAY_GRACE_PERIOD: DEFAULT_USER_AWAY_GRACE_PERIOD,
         }
     return migrated

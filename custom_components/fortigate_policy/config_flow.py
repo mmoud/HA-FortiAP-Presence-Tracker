@@ -16,8 +16,6 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
-    EntitySelector,
-    EntitySelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -38,27 +36,13 @@ from .api import (
 from .const import (
     CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
-    CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
     CONF_NETWORK_CREATE_TRACKER_ENTITIES,
     CONF_NETWORK_NEW_DEVICE_DETECTION,
     CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICIES,
-    CONF_POLICY_AUTOMATION_DRY_RUN,
-    CONF_POLICY_AUTOMATION_ENABLED,
     CONF_POLICY_IDS,
-    CONF_POLICY_RULE_ACTION,
-    CONF_POLICY_RULE_ID,
-    CONF_POLICY_RULE_MATCH,
-    CONF_POLICY_RULE_NAME,
-    CONF_POLICY_RULE_POLICIES,
-    CONF_POLICY_RULE_PRESENCE,
-    CONF_POLICY_RULE_PRIORITY,
-    CONF_POLICY_RULE_SCHEDULE,
-    CONF_POLICY_RULE_USERS,
-    CONF_POLICY_RULES_TO_REMOVE,
-    CONF_POLICY_RULES_V2,
     CONF_POLL_INTERVAL,
     CONF_PRESENCE_USER_ID,
     CONF_PRESENCE_USER_MACS,
@@ -78,9 +62,6 @@ from .const import (
     DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
     DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
     DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
-    DEFAULT_OVERRIDE_MINUTES,
-    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
-    DEFAULT_POLICY_AUTOMATION_ENABLED,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
@@ -92,7 +73,6 @@ from .const import (
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
     DOMAIN,
-    MAX_OVERRIDE_MINUTES,
     MAX_POLL_INTERVAL,
     MAX_RECENT_CLIENT_RETENTION_DAYS,
     MAX_RECENT_WIFI_CLIENTS,
@@ -103,12 +83,6 @@ from .const import (
     MIN_USER_AWAY_GRACE_PERIOD,
     MIN_WIFI_AWAY_GRACE_PERIOD,
     MIN_WIFI_POLL_INTERVAL,
-    RULE_MATCH_ALL,
-    RULE_MATCH_ANY,
-    RULE_PRESENCE_AWAY,
-    RULE_PRESENCE_HOME,
-    STATUS_DISABLE,
-    STATUS_ENABLE,
 )
 from .policy_config import (
     PolicyDefinition,
@@ -117,12 +91,7 @@ from .policy_config import (
     parse_optional_policy_ids,
     serialize_policies,
 )
-from .policy_rules import serialize_policy_rules
-from .presence_users import (
-    aggregate_presence,
-    configured_presence_users,
-    serialize_presence_users,
-)
+from .presence_users import serialize_presence_users
 from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 TOKEN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
@@ -134,20 +103,10 @@ def _options_hub_summary(
     """Return bounded, non-sensitive counts for the configuration hub."""
     tracked = options.get(CONF_TRACKED_CLIENTS, {})
     users = options.get(CONF_PRESENCE_USERS, {})
-    rules = options.get(CONF_POLICY_RULES_V2, {})
-    automation_enabled = options.get(
-        CONF_POLICY_AUTOMATION_ENABLED, DEFAULT_POLICY_AUTOMATION_ENABLED
-    )
-    dry_run = options.get(
-        CONF_POLICY_AUTOMATION_DRY_RUN, DEFAULT_POLICY_AUTOMATION_DRY_RUN
-    )
-    automation = "Off" if not automation_enabled else "Dry run" if dry_run else "Active"
     return {
         "tracked": str(len(tracked) if isinstance(tracked, dict) else 0),
         "users": str(len(users) if isinstance(users, dict) else 0),
-        "rules": str(len(rules) if isinstance(rules, dict) else 0),
         "policies": str(len(configured_policies(data))),
-        "automation": automation,
     }
 
 
@@ -285,26 +244,6 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
                     DEFAULT_WIFI_CLIENT_COUNT_SENSOR,
                 ),
             ): bool,
-            vol.Required(
-                CONF_POLICY_AUTOMATION_ENABLED,
-                default=defaults.get(
-                    CONF_POLICY_AUTOMATION_ENABLED,
-                    DEFAULT_POLICY_AUTOMATION_ENABLED,
-                ),
-            ): bool,
-            vol.Required(
-                CONF_POLICY_AUTOMATION_DRY_RUN,
-                default=defaults.get(
-                    CONF_POLICY_AUTOMATION_DRY_RUN,
-                    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
-                ),
-            ): bool,
-            vol.Required(
-                CONF_DEFAULT_OVERRIDE_MINUTES,
-                default=defaults.get(
-                    CONF_DEFAULT_OVERRIDE_MINUTES, DEFAULT_OVERRIDE_MINUTES
-                ),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_OVERRIDE_MINUTES)),
             vol.Required(
                 CONF_RECENT_CLIENT_RETENTION_DAYS,
                 default=defaults.get(
@@ -465,7 +404,7 @@ def _error_key(err: Exception) -> str:
 class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure the integration entirely through Home Assistant's UI."""
 
-    VERSION = 7
+    VERSION = 8
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -593,9 +532,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self._selected_macs: list[str] = []
         self._named_clients: dict[str, dict[str, Any]] = {}
         self._presence_user_id: str | None = None
-        self._policy_rule_id: str | None = None
-        self._pending_policy_rule: dict[str, Any] | None = None
-        self._pending_guided_user: dict[str, Any] | None = None
         self._tracker_filter_mac: str | None = None
 
     async def async_step_init(
@@ -605,9 +541,7 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         return self.async_show_menu(
             step_id="init",
             menu_options=[
-                "guided_parental_control",
                 "people_devices",
-                "parental_controls",
                 "firewall_policies",
                 "advanced_settings",
             ],
@@ -640,242 +574,12 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
             },
         )
 
-    async def async_step_parental_controls(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Group guided setup and rule management away from device discovery."""
-        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        menu = ["guided_parental_control"]
-        if (
-            isinstance(users, dict)
-            and users
-            and configured_policies(self.config_entry.data)
-        ):
-            menu.append("policy_rules")
-        return self.async_show_menu(
-            step_id="parental_controls",
-            menu_options=menu,
-            description_placeholders={
-                "users": str(len(users) if isinstance(users, dict) else 0),
-                "rules": str(len(rules) if isinstance(rules, dict) else 0),
-            },
-        )
-
     async def async_step_advanced_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Keep polling and automation safety controls out of the main path."""
+        """Keep polling controls out of the main path."""
         return self.async_show_menu(
             step_id="advanced_settings", menu_options=["wifi_settings"]
-        )
-
-    async def async_step_guided_parental_control(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Start the shortest safe path to a person and one policy rule."""
-        tracked = self.config_entry.options.get(CONF_TRACKED_CLIENTS, {})
-        if not isinstance(tracked, dict) or not tracked:
-            return await self.async_step_wifi_clients()
-        if not configured_policies(self.config_entry.data):
-            return await self.async_step_guided_policy_required()
-        if not self._unassigned_tracker_options():
-            users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-            if isinstance(users, dict) and users:
-                return await self.async_step_guided_existing_person(user_input)
-            return await self.async_step_wifi_clients()
-        self._presence_user_id = self._presence_user_id or uuid4().hex
-        return await self.async_step_guided_person(user_input)
-
-    async def async_step_guided_policy_required(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Explain why policy control is required by the automation wizard."""
-        return self.async_show_menu(
-            step_id="guided_policy_required",
-            menu_options=["firewall_policies", "presence_users"],
-        )
-
-    async def async_step_guided_existing_person(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Use an existing person when every tracker is already assigned."""
-        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-        if not isinstance(users, dict) or not users:
-            return await self.async_step_presence_users()
-        if user_input is not None:
-            selected = user_input.get(CONF_PRESENCE_USER_ID)
-            if isinstance(selected, str) and selected in users:
-                self._presence_user_id = selected
-                self._pending_guided_user = None
-                return await self.async_step_guided_policy()
-        return self.async_show_form(
-            step_id="guided_existing_person",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_PRESENCE_USER_ID): SelectSelector(
-                        SelectSelectorConfig(options=self._user_options())
-                    )
-                }
-            ),
-        )
-
-    def _guided_person_name(self) -> str | None:
-        """Return the new or existing person selected by guided setup."""
-        if self._pending_guided_user is not None:
-            return str(self._pending_guided_user[CONF_PRESENCE_USER_NAME])
-        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-        if not isinstance(users, dict) or self._presence_user_id is None:
-            return None
-        user = users.get(self._presence_user_id)
-        if not isinstance(user, dict):
-            return None
-        name = str(user.get(CONF_PRESENCE_USER_NAME, "")).strip()
-        return name or None
-
-    async def async_step_guided_person(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Collect the stable person identity and all of their Wi-Fi devices."""
-        if self._presence_user_id is None:
-            return await self.async_step_guided_parental_control()
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            name = str(user_input.get(CONF_PRESENCE_USER_NAME, "")).strip()
-            selected_macs = {
-                normalized
-                for mac in user_input.get(CONF_PRESENCE_USER_MACS, [])
-                if (normalized := normalize_mac(mac)) is not None
-            }
-            assigned = self._assigned_tracker_macs()
-            if not name:
-                errors[CONF_PRESENCE_USER_NAME] = "required"
-            elif not selected_macs:
-                errors[CONF_PRESENCE_USER_MACS] = "select_user_device"
-            elif selected_macs & assigned:
-                errors[CONF_PRESENCE_USER_MACS] = "device_already_assigned"
-            else:
-                self._pending_guided_user = {
-                    CONF_PRESENCE_USER_NAME: name,
-                    CONF_PRESENCE_USER_MACS: sorted(selected_macs),
-                    CONF_USER_AWAY_GRACE_PERIOD: int(
-                        user_input.get(
-                            CONF_USER_AWAY_GRACE_PERIOD,
-                            DEFAULT_USER_AWAY_GRACE_PERIOD,
-                        )
-                    ),
-                }
-                return await self.async_step_guided_policy()
-        return self.async_show_form(
-            step_id="guided_person",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_PRESENCE_USER_NAME): TextSelector(
-                        TextSelectorConfig()
-                    ),
-                    vol.Required(CONF_PRESENCE_USER_MACS, default=[]): SelectSelector(
-                        SelectSelectorConfig(
-                            options=self._unassigned_tracker_options(), multiple=True
-                        )
-                    ),
-                    vol.Required(
-                        CONF_USER_AWAY_GRACE_PERIOD,
-                        default=self.config_entry.options.get(
-                            CONF_WIFI_AWAY_GRACE_PERIOD,
-                            DEFAULT_USER_AWAY_GRACE_PERIOD,
-                        ),
-                    ): NumberSelector(
-                        NumberSelectorConfig(
-                            min=MIN_USER_AWAY_GRACE_PERIOD,
-                            max=MAX_USER_AWAY_GRACE_PERIOD,
-                            step=15,
-                            mode=NumberSelectorMode.BOX,
-                            unit_of_measurement="s",
-                        )
-                    ),
-                }
-            ),
-            errors=errors,
-        )
-
-    async def async_step_guided_policy(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Collect policy behavior before using the normal verified preview."""
-        person = self._guided_person_name()
-        if self._presence_user_id is None or person is None:
-            return await self.async_step_guided_parental_control()
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            if not str(user_input.get(CONF_POLICY_RULE_NAME, "")).strip():
-                errors[CONF_POLICY_RULE_NAME] = "required"
-            elif not user_input.get(CONF_POLICY_RULE_POLICIES):
-                errors[CONF_POLICY_RULE_POLICIES] = "select_rule_policy"
-            else:
-                self._policy_rule_id = self._policy_rule_id or uuid4().hex
-                self._pending_policy_rule = {
-                    CONF_POLICY_RULE_NAME: str(
-                        user_input[CONF_POLICY_RULE_NAME]
-                    ).strip(),
-                    CONF_POLICY_RULE_USERS: [self._presence_user_id],
-                    CONF_POLICY_RULE_MATCH: RULE_MATCH_ANY,
-                    CONF_POLICY_RULE_PRESENCE: user_input[CONF_POLICY_RULE_PRESENCE],
-                    CONF_POLICY_RULE_ACTION: user_input[CONF_POLICY_RULE_ACTION],
-                    CONF_POLICY_RULE_POLICIES: list(
-                        user_input[CONF_POLICY_RULE_POLICIES]
-                    ),
-                    CONF_POLICY_RULE_PRIORITY: int(
-                        user_input[CONF_POLICY_RULE_PRIORITY]
-                    ),
-                    CONF_POLICY_RULE_SCHEDULE: str(
-                        user_input.get(CONF_POLICY_RULE_SCHEDULE, "")
-                    ),
-                }
-                return await self.async_step_guided_policy_rule_preview()
-        policy_options = [
-            {
-                "value": policy.policy_id,
-                "label": f"{policy.expected_name or 'Policy'} ({policy.policy_id})",
-            }
-            for policy in configured_policies(self.config_entry.data)
-        ]
-        return self.async_show_form(
-            step_id="guided_policy",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_POLICY_RULE_NAME, default=f"{person} policy"
-                    ): TextSelector(TextSelectorConfig()),
-                    vol.Required(
-                        CONF_POLICY_RULE_PRESENCE, default=RULE_PRESENCE_AWAY
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[RULE_PRESENCE_HOME, RULE_PRESENCE_AWAY],
-                            translation_key="policy_rule_presence",
-                        )
-                    ),
-                    vol.Required(
-                        CONF_POLICY_RULE_ACTION, default=STATUS_DISABLE
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[STATUS_ENABLE, STATUS_DISABLE],
-                            translation_key="policy_rule_action",
-                        )
-                    ),
-                    vol.Required(CONF_POLICY_RULE_POLICIES): SelectSelector(
-                        SelectSelectorConfig(options=policy_options, multiple=True)
-                    ),
-                    vol.Required(CONF_POLICY_RULE_PRIORITY, default=50): NumberSelector(
-                        NumberSelectorConfig(
-                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
-                        )
-                    ),
-                    vol.Optional(CONF_POLICY_RULE_SCHEDULE): EntitySelector(
-                        EntitySelectorConfig(domain="schedule")
-                    ),
-                }
-            ),
-            errors=errors,
         )
 
     async def async_step_remove_wifi_trackers(
@@ -918,16 +622,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                         **dict(self.config_entry.options),
                         CONF_TRACKED_CLIENTS: remaining,
                         CONF_PRESENCE_USERS: users,
-                        CONF_POLICY_RULES_V2: serialize_policy_rules(
-                            self.config_entry.options.get(CONF_POLICY_RULES_V2, {}),
-                            set(users),
-                            {
-                                policy.policy_id
-                                for policy in configured_policies(
-                                    self.config_entry.data
-                                )
-                            },
-                        ),
                     }
                 )
 
@@ -983,11 +677,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 options[CONF_PRESENCE_USERS] = serialize_presence_users(
                     current_users if isinstance(current_users, dict) else {},
                     set(self._selected_from_options()),
-                    {policy.policy_id for policy in policies},
-                )
-                options[CONF_POLICY_RULES_V2] = serialize_policy_rules(
-                    options.get(CONF_POLICY_RULES_V2, {}),
-                    set(options[CONF_PRESENCE_USERS]),
                     {policy.policy_id for policy in policies},
                 )
                 return self.async_create_entry(data=options)
@@ -1221,19 +910,10 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     for user_id, user in users.items()
                     if user_id not in remove
                 }
-                policy_ids = {
-                    policy.policy_id
-                    for policy in configured_policies(self.config_entry.data)
-                }
                 return self.async_create_entry(
                     data={
                         **dict(self.config_entry.options),
                         CONF_PRESENCE_USERS: remaining_users,
-                        CONF_POLICY_RULES_V2: serialize_policy_rules(
-                            self.config_entry.options.get(CONF_POLICY_RULES_V2, {}),
-                            set(remaining_users),
-                            policy_ids,
-                        ),
                     }
                 )
         return self.async_show_form(
@@ -1243,364 +923,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                     vol.Required(CONF_PRESENCE_USERS_TO_REMOVE): SelectSelector(
                         SelectSelectorConfig(
                             options=self._user_options(), multiple=True
-                        )
-                    )
-                }
-            ),
-            errors=errors,
-        )
-
-    async def async_step_policy_rules(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Manage policy-centric multi-user rules."""
-        raw_rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        menu = ["add_policy_rule"]
-        if isinstance(raw_rules, dict) and raw_rules:
-            menu.extend(["edit_policy_rule", "remove_policy_rules"])
-        return self.async_show_menu(step_id="policy_rules", menu_options=menu)
-
-    def _policy_rule_options(self) -> list[dict[str, str]]:
-        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        if not isinstance(rules, dict):
-            return []
-        return [
-            {
-                "value": rule_id,
-                "label": str(rule.get(CONF_POLICY_RULE_NAME, rule_id)),
-            }
-            for rule_id, rule in sorted(rules.items())
-            if isinstance(rule_id, str) and isinstance(rule, dict)
-        ]
-
-    async def async_step_add_policy_rule(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        self._policy_rule_id = self._policy_rule_id or uuid4().hex
-        return await self._async_policy_rule_form(user_input, {})
-
-    async def async_step_edit_policy_rule(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        if not isinstance(rules, dict) or not rules:
-            return self.async_abort(reason="no_policy_rules")
-        if user_input is not None:
-            selected = user_input.get(CONF_POLICY_RULE_ID)
-            if isinstance(selected, str) and selected in rules:
-                self._policy_rule_id = selected
-                return await self.async_step_edit_policy_rule_details()
-        return self.async_show_form(
-            step_id="edit_policy_rule",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_POLICY_RULE_ID): SelectSelector(
-                        SelectSelectorConfig(options=self._policy_rule_options())
-                    )
-                }
-            ),
-        )
-
-    async def async_step_edit_policy_rule_details(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        if (
-            self._policy_rule_id is None
-            or not isinstance(rules, dict)
-            or not isinstance(rules.get(self._policy_rule_id), dict)
-        ):
-            return await self.async_step_edit_policy_rule()
-        return await self._async_policy_rule_form(
-            user_input, rules[self._policy_rule_id]
-        )
-
-    async def _async_policy_rule_form(
-        self, user_input: dict[str, Any] | None, current: dict[str, Any]
-    ) -> ConfigFlowResult:
-        if self._policy_rule_id is None:
-            return await self.async_step_policy_rules()
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            if not str(user_input.get(CONF_POLICY_RULE_NAME, "")).strip():
-                errors[CONF_POLICY_RULE_NAME] = "required"
-            elif not user_input.get(CONF_POLICY_RULE_USERS):
-                errors[CONF_POLICY_RULE_USERS] = "select_rule_user"
-            elif not user_input.get(CONF_POLICY_RULE_POLICIES):
-                errors[CONF_POLICY_RULE_POLICIES] = "select_rule_policy"
-            else:
-                self._pending_policy_rule = {
-                    CONF_POLICY_RULE_NAME: str(
-                        user_input[CONF_POLICY_RULE_NAME]
-                    ).strip(),
-                    CONF_POLICY_RULE_USERS: list(user_input[CONF_POLICY_RULE_USERS]),
-                    CONF_POLICY_RULE_MATCH: user_input[CONF_POLICY_RULE_MATCH],
-                    CONF_POLICY_RULE_PRESENCE: user_input[CONF_POLICY_RULE_PRESENCE],
-                    CONF_POLICY_RULE_ACTION: user_input[CONF_POLICY_RULE_ACTION],
-                    CONF_POLICY_RULE_POLICIES: list(
-                        user_input[CONF_POLICY_RULE_POLICIES]
-                    ),
-                    CONF_POLICY_RULE_PRIORITY: int(
-                        user_input[CONF_POLICY_RULE_PRIORITY]
-                    ),
-                    CONF_POLICY_RULE_SCHEDULE: str(
-                        user_input.get(CONF_POLICY_RULE_SCHEDULE, "")
-                    ),
-                }
-                return await self.async_step_policy_rule_preview()
-
-        policy_options = [
-            {
-                "value": policy.policy_id,
-                "label": f"{policy.expected_name or 'Policy'} ({policy.policy_id})",
-            }
-            for policy in configured_policies(self.config_entry.data)
-        ]
-        schedule_default = current.get(CONF_POLICY_RULE_SCHEDULE)
-        schedule_field = (
-            vol.Optional(CONF_POLICY_RULE_SCHEDULE, default=schedule_default)
-            if isinstance(schedule_default, str) and schedule_default
-            else vol.Optional(CONF_POLICY_RULE_SCHEDULE)
-        )
-        return self.async_show_form(
-            step_id=("edit_policy_rule_details" if current else "add_policy_rule"),
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_POLICY_RULE_NAME,
-                        default=current.get(CONF_POLICY_RULE_NAME, ""),
-                    ): TextSelector(TextSelectorConfig()),
-                    vol.Required(
-                        CONF_POLICY_RULE_USERS,
-                        default=current.get(CONF_POLICY_RULE_USERS, []),
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=self._user_options(), multiple=True
-                        )
-                    ),
-                    vol.Required(
-                        CONF_POLICY_RULE_MATCH,
-                        default=current.get(CONF_POLICY_RULE_MATCH, RULE_MATCH_ANY),
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[RULE_MATCH_ANY, RULE_MATCH_ALL],
-                            translation_key="policy_rule_match",
-                        )
-                    ),
-                    vol.Required(
-                        CONF_POLICY_RULE_PRESENCE,
-                        default=current.get(
-                            CONF_POLICY_RULE_PRESENCE, RULE_PRESENCE_HOME
-                        ),
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[RULE_PRESENCE_HOME, RULE_PRESENCE_AWAY],
-                            translation_key="policy_rule_presence",
-                        )
-                    ),
-                    vol.Required(
-                        CONF_POLICY_RULE_ACTION,
-                        default=current.get(CONF_POLICY_RULE_ACTION, STATUS_DISABLE),
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[STATUS_ENABLE, STATUS_DISABLE],
-                            translation_key="policy_rule_action",
-                        )
-                    ),
-                    vol.Required(
-                        CONF_POLICY_RULE_POLICIES,
-                        default=current.get(CONF_POLICY_RULE_POLICIES, []),
-                    ): SelectSelector(
-                        SelectSelectorConfig(options=policy_options, multiple=True)
-                    ),
-                    vol.Required(
-                        CONF_POLICY_RULE_PRIORITY,
-                        default=current.get(CONF_POLICY_RULE_PRIORITY, 50),
-                    ): NumberSelector(
-                        NumberSelectorConfig(
-                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
-                        )
-                    ),
-                    schedule_field: EntitySelector(
-                        EntitySelectorConfig(domain="schedule")
-                    ),
-                }
-            ),
-            errors=errors,
-        )
-
-    async def async_step_policy_rule_preview(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Require an explicit confirmation after showing the exact rule effect."""
-        return await self._async_policy_rule_preview(user_input, "policy_rule_preview")
-
-    async def async_step_guided_policy_rule_preview(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Confirm the final step of the guided person-and-rule workflow."""
-        return await self._async_policy_rule_preview(
-            user_input, "guided_policy_rule_preview"
-        )
-
-    async def _async_policy_rule_preview(
-        self, user_input: dict[str, Any] | None, step_id: str
-    ) -> ConfigFlowResult:
-        """Validate and persist a normal or guided rule after confirmation."""
-        if self._policy_rule_id is None or self._pending_policy_rule is None:
-            return await self.async_step_policy_rules()
-        errors: dict[str, str] = {}
-        if user_input is not None and user_input.get("confirm") is True:
-            rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-            updated = dict(rules) if isinstance(rules, dict) else {}
-            updated[self._policy_rule_id] = self._pending_policy_rule
-            options = dict(self.config_entry.options)
-            user_ids = set(self._user_ids())
-            if self._pending_guided_user is not None:
-                users = options.get(CONF_PRESENCE_USERS, {})
-                updated_users = dict(users) if isinstance(users, dict) else {}
-                updated_users[self._presence_user_id] = self._pending_guided_user
-                updated_users = serialize_presence_users(
-                    updated_users,
-                    set(self._selected_from_options()),
-                    {
-                        policy.policy_id
-                        for policy in configured_policies(self.config_entry.data)
-                    },
-                )
-                options[CONF_PRESENCE_USERS] = updated_users
-                user_ids = set(updated_users)
-            policy_ids = {
-                policy.policy_id
-                for policy in configured_policies(self.config_entry.data)
-            }
-            normalized = serialize_policy_rules(updated, user_ids, policy_ids)
-            return self.async_create_entry(
-                data={
-                    **options,
-                    CONF_POLICY_RULES_V2: normalized,
-                }
-            )
-        if user_input is not None:
-            errors["confirm"] = "confirmation_required"
-        pending = self._pending_policy_rule
-        users = ", ".join(
-            option["label"]
-            for option in self._user_options()
-            if option["value"] in pending[CONF_POLICY_RULE_USERS]
-        )
-        if self._pending_guided_user is not None:
-            users = str(self._pending_guided_user[CONF_PRESENCE_USER_NAME])
-        policies = ", ".join(pending[CONF_POLICY_RULE_POLICIES])
-        schedule = pending.get(CONF_POLICY_RULE_SCHEDULE) or "Always"
-        current_states = (
-            "New user will be evaluated after save"
-            if self._pending_guided_user is not None
-            else "Waiting for a valid Wi-Fi update"
-        )
-        runtime = getattr(self.config_entry, "runtime_data", None)
-        wifi = getattr(runtime, "wifi_coordinator", None)
-        if (
-            self._pending_guided_user is None
-            and wifi is not None
-            and wifi.last_update_success
-            and wifi.data is not None
-        ):
-            configured_users = configured_presence_users(
-                self.config_entry.options,
-                set(self._selected_from_options()),
-                {
-                    policy.policy_id
-                    for policy in configured_policies(self.config_entry.data)
-                },
-            )
-            selected_users = set(pending[CONF_POLICY_RULE_USERS])
-            current_states = (
-                ", ".join(
-                    f"{user.name}="
-                    + (
-                        "home"
-                        if (
-                            state := aggregate_presence(
-                                user, wifi.data.presence, utcnow()
-                            )
-                        )
-                        is True
-                        else "away"
-                        if state is False
-                        else "unknown"
-                    )
-                    for user in configured_users
-                    if user.user_id in selected_users
-                )
-                or current_states
-            )
-        raw_rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        conflict = "None detected"
-        if isinstance(raw_rules, dict) and any(
-            isinstance(rule, dict)
-            and rule.get(CONF_POLICY_RULE_PRIORITY)
-            == pending[CONF_POLICY_RULE_PRIORITY]
-            and rule.get(CONF_POLICY_RULE_ACTION) != pending[CONF_POLICY_RULE_ACTION]
-            and set(rule.get(CONF_POLICY_RULE_POLICIES, []))
-            & set(pending[CONF_POLICY_RULE_POLICIES])
-            for rule_id, rule in raw_rules.items()
-            if rule_id != self._policy_rule_id
-        ):
-            conflict = (
-                "Possible equal-priority conflict; disable will win if both match"
-            )
-        return self.async_show_form(
-            step_id=step_id,
-            data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
-            description_placeholders={
-                "name": pending[CONF_POLICY_RULE_NAME],
-                "users": users,
-                "match": pending[CONF_POLICY_RULE_MATCH],
-                "presence": pending[CONF_POLICY_RULE_PRESENCE],
-                "action": pending[CONF_POLICY_RULE_ACTION],
-                "policies": policies,
-                "priority": str(pending[CONF_POLICY_RULE_PRIORITY]),
-                "schedule": str(schedule),
-                "current_states": current_states,
-                "conflict": conflict,
-            },
-            errors=errors,
-        )
-
-    def _user_ids(self) -> list[str]:
-        users = self.config_entry.options.get(CONF_PRESENCE_USERS, {})
-        return list(users) if isinstance(users, dict) else []
-
-    async def async_step_remove_policy_rules(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        rules = self.config_entry.options.get(CONF_POLICY_RULES_V2, {})
-        if not isinstance(rules, dict) or not rules:
-            return self.async_abort(reason="no_policy_rules")
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            remove = set(user_input.get(CONF_POLICY_RULES_TO_REMOVE, []))
-            if not remove:
-                errors["base"] = "select_policy_rule_to_remove"
-            else:
-                return self.async_create_entry(
-                    data={
-                        **dict(self.config_entry.options),
-                        CONF_POLICY_RULES_V2: {
-                            rule_id: rule
-                            for rule_id, rule in rules.items()
-                            if rule_id not in remove
-                        },
-                    }
-                )
-        return self.async_show_form(
-            step_id="remove_policy_rules",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_POLICY_RULES_TO_REMOVE): SelectSelector(
-                        SelectSelectorConfig(
-                            options=self._policy_rule_options(), multiple=True
                         )
                     )
                 }
@@ -1820,14 +1142,6 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
         self._new_options[CONF_PRESENCE_USERS] = serialize_presence_users(
             current_users if isinstance(current_users, dict) else {},
             set(self._selected_macs),
-            {
-                policy.policy_id
-                for policy in configured_policies(self.config_entry.data)
-            },
-        )
-        self._new_options[CONF_POLICY_RULES_V2] = serialize_policy_rules(
-            self._new_options.get(CONF_POLICY_RULES_V2, {}),
-            set(self._new_options[CONF_PRESENCE_USERS]),
             {
                 policy.policy_id
                 for policy in configured_policies(self.config_entry.data)

@@ -4,27 +4,28 @@
 
 # FortiAP Presence Tracker for Home Assistant
 
-Home Assistant integration for controlling FortiGate firewall policies and tracking selected FortiAP Wi-Fi clients.
+A local Home Assistant integration for selected FortiAP Wi-Fi clients and verified FortiGate firewall-policy switches.
 
-It provides:
+The two features are independent. Use presence only, policy switches only, or connect them with normal Home Assistant automations.
 
-- an optional verified switch for each configured firewall policy
-- `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
-- persistent first-seen, last-seen, connection, and network metadata per client
-- one-time new-device events and an unknown-device count sensor
-- multi-device presence users for phones, watches, and tablets
-- policy-centric ANY/ALL rules with priorities and optional Schedule helpers
-- dry-run mode, expiring policy overrides, and per-policy decision sensors
-- an optional sensor showing the number of associated Wi-Fi clients
-- a read-only button for immediately refreshing policy and presence data
-- full setup and configuration through the Home Assistant UI
+## Features
+
+- selected-client discovery without creating entities for every network device
+- `device_tracker` and presence `binary_sensor` entities
+- multi-device people for a phone, watch, tablet, or other tracked devices
+- conservative away timeout and correct FortiAP roaming behavior
+- persistent first seen, last seen, connection, and network metadata
+- optional new-device event, unknown-device sensor, and client-count sensor
+- one verified switch per configured FortiGate policy
+- full configuration through a responsive Home Assistant panel
+- centralized polling with one bulk client request per refresh
 
 ## Requirements
 
 - Home Assistant 2026.8 or newer
 - FortiGate reachable from Home Assistant over HTTPS
-- FortiOS REST API token
-- FortiAPs managed by the configured FortiGate for Wi-Fi tracking
+- a dedicated FortiOS REST API administrator
+- FortiAPs managed by that FortiGate when presence tracking is used
 
 ## Installation
 
@@ -34,253 +35,101 @@ It provides:
 4. Open **Settings > Devices & services > Add integration**.
 5. Search for **FortiAP Presence Tracker** and complete the form.
 
-No YAML configuration is required.
+No YAML is required. After setup, use **FortiAP Presence** in the sidebar for day-to-day configuration.
 
-The FortiGate device includes a **Refresh data** button. It requests an immediate read of the enabled features; it does not change firewall configuration.
+## Operating modes
 
-## Choose an operating mode
+### Presence only
 
-Policy control and network presence tracking are independent. Use only the features needed for the installation.
+Leave the policy list empty. Enable network tracking, select devices under **Devices**, and optionally combine them under **People**. Firewall-policy write permission is not needed.
 
-### Policy-only mode
+### Policy switches only
 
-Use this mode when Home Assistant should provide normal switches for existing FortiGate policies without creating Wi-Fi trackers or people.
+Disable network tracking and add one or more existing policy IDs under **Policy switches**. Home Assistant creates an independent switch for every verified policy. FortiAP access is not required.
 
-1. Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**.
-2. Under **Settings**, turn off **Enable network device tracking**.
-3. Under **Policies & rules**, add one or more existing FortiGate policy IDs.
-4. Leave people and presence rules empty, then select **Save changes**.
+### Presence and policy control
 
-Home Assistant creates one switch for each verified policy, such as `switch.fortigate_policy_61`. Turning the switch on enables the policy; turning it off disables the policy. Each command is followed by a FortiGate read-back, so a rejected or unverified change cannot leave the switch showing the requested state. Multiple policies remain independent switches and can be used in dashboards, automations, and HomeKit Bridge.
+Configure both features, then create Home Assistant automations that use a tracker as the trigger and a policy switch as the action. This keeps schedules, conditions, traces, notifications, and manual exceptions in Home Assistant's standard automation system.
 
-Policy-only mode does not call the FortiGate Wi-Fi client endpoint and does not require FortiAPs. Its API administrator needs firewall-policy read/write permission in the configured VDOM.
-
-### Presence-only mode
-
-Use this mode for `device_tracker` and presence `binary_sensor` entities without allowing the integration to modify firewall policies.
-
-1. Leave the firewall policy list empty.
-2. Enable network device tracking under **Settings**.
-3. Add trackers and optional multi-device people under **People & devices**.
-4. Leave policy rules empty and save.
-
-Presence-only mode needs read access to Wireless Controller monitor data. It does not need firewall-policy write permission.
-
-### Combined mode
-
-Configure both trackers and policy IDs when presence should control policies. Add people under **People & devices**, then define the required policy behavior under **Policies & rules**. Unknown or unavailable presence never acts as an away result.
+See [Policy control with Home Assistant automations](docs/parental-control.md) for step-by-step GUI examples. It covers arrival, departure, multiple devices, multiple policies, several people, schedules, testing, and failure safety. The examples do not require editing YAML.
 
 ## FortiGate API account
 
-Create a dedicated REST API administrator, for example `homeassistant-api`. Presence-only installations need read access to Wireless Controller monitor data. Policy-only installations need read/write access to firewall policies in the required VDOM. Combined installations need both permission sets.
+Create a dedicated REST API administrator such as `homeassistant-api`.
 
-FortiOS permission profiles are generally scoped to configuration areas, not to one policy ID. Use the integration's expected-policy-name check as an additional safeguard, and restrict the API administrator's trusted hosts to the Home Assistant IP where possible.
+- Presence tracking needs read access to Wireless Controller monitor data.
+- Policy switches need read/write access to firewall policies in the configured VDOM.
+- A combined installation needs both.
 
-Keep the FortiGate management interface on a private network. Do not expose it to the internet.
+FortiOS permission profiles normally cover a configuration area rather than one policy ID. Restrict the administrator's trusted hosts to the Home Assistant address, use the least-permissive profile that works on the installed FortiOS release, and keep the management interface private. Do not expose it to the Internet.
 
-## Policy switch
+## Policy switches
 
-The setup form requires the FortiGate host, HTTPS port, VDOM, API token, and TLS verification setting. Firewall policy IDs are optional. Leave the field empty when the integration will only create presence trackers and people. Enter one ID or a comma-separated list such as `61, 72, 83` only when Home Assistant should create switches for those existing policies or use them in built-in parental-control rules.
+Policy IDs are optional and may be added or removed later. Each ID must identify an existing IPv4 firewall policy in the configured VDOM.
 
-Each supplied ID is the numeric ID of an existing FortiGate firewall policy. It is read before the entry is saved, its returned name is stored as an identity guard, and Home Assistant creates a separate switch for every validated policy. The integration changes only the policy's enabled/disabled status. Add, remove, or clear IDs later on **Policies & rules**; clearing them does not remove Wi-Fi trackers or people.
-
-The switch uses these endpoints:
+The integration uses:
 
 ```text
 GET /api/v2/cmdb/firewall/policy/<policy-id>?vdom=<vdom>
 PUT /api/v2/cmdb/firewall/policy/<policy-id>?vdom=<vdom>
 ```
 
-The PUT body changes only the policy status:
+The PUT body contains only `{"status":"enable"}` or `{"status":"disable"}`. Before writing, the integration reads the policy and confirms its ID and saved name. It then reads the policy again after the write. The switch changes only after FortiGate reports the requested state. A failed read makes the switch unavailable; it is never interpreted as OFF.
 
-```json
-{"status":"enable"}
-```
+Policy switches can be used manually, on dashboards, in Home Assistant automations, or through HomeKit Bridge. The integration itself does not automatically connect presence to policy state.
 
-or:
+## Network presence
 
-```json
-{"status":"disable"}
-```
-
-Before a write, the integration reads the selected policy and checks its ID and stored name. After the write, it reads that policy again and updates its switch only after FortiGate reports the requested state. A failed or unreliable read makes that switch unavailable; it is never interpreted as OFF.
-
-TLS certificate verification is enabled by default. Disable it only when the FortiGate uses a certificate that Home Assistant cannot validate. With verification disabled, the connection is encrypted but the FortiGate's identity is not verified.
-
-## Network Device Presence+
-
-Open **Settings > Devices & services > FortiAP Presence Tracker** and select **Configure**. Version 3 provides a full-width management page instead of placing normal administration in a sequence of small dialogs. The same page is also available from **FortiAP Presence** in the Home Assistant sidebar.
-
-The page is organized into four wide views:
-
-- **Overview** shows connection health, configuration counts, safety behavior, and every person/device assignment.
-- **People & devices** puts people management first. Create, rename, assign, and remove people in place, then manage tracker state, SSID/FortiAP details, friendly names, SSID scopes, and client discovery on the same page. The discovery table scrolls independently so a large FortiGate catalog does not hide people controls.
-- **Policies & rules** manages optional verified firewall policy IDs and presence rules together.
-- **Settings** contains polling, away timing, enforcement, dry-run mode, override duration, retention, and sensors.
-
-Changes remain local to the page until **Save changes** is selected. The backend then validates the complete configuration, re-reads every configured policy using its saved name guard, updates the config entry atomically, and reloads the integration. Invalid input does not partially modify the integration.
-
-The management page is bundled with the HACS integration; no separate frontend repository, card, add-on, or YAML resource is required. It is restricted to Home Assistant administrators. The API token and authorization header are never sent to the panel.
-
-Disabling Wi-Fi tracking is reversible and retains the selected devices. Remove a row from **People & devices** and save when its tracker and presence entities should be deleted from Home Assistant.
-
-Use **Policies & rules** to add or remove policy IDs. The integration verifies every policy and its existing name guard before saving the change.
-
-On the tracker screen, enable network device tracking, select one or more devices, and save. Only newly selected devices ask for a friendly name; existing names are preserved. Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. Unselected clients remain in the bounded discovery inventory but do not create a Device Registry entry, preventing entity floods on guest networks.
-
-Each selected MAC creates one Home Assistant Device Registry device containing:
-
-- `device_tracker.<device_name>` with `home`, `not_home`, or unavailable state
-- `binary_sensor.<device_name>_presence`, which is ON at home, OFF when away, and unavailable during a FortiGate/API failure
-- IP address, connection type, SSID, access point, first seen, last seen, and connected-since sensors
-- connection duration and signal-strength sensors, disabled by default to reduce recorder churn
-
-All entities use the same coordinator result; adding devices or enabling detail sensors does not add FortiGate requests. VLAN, interface, FortiAP serial, band, channel, and FortiGate-reported manufacturer are exposed only when available. No Internet OUI lookup is performed.
-
-On **People & devices**, assign a phone, watch, tablet, or other selected trackers to one person. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The person is home as soon as any assigned device is home. The person becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the person is unavailable rather than away.
-
-The **People and devices** landing page lists all people and their assignments without opening an edit form. If every tracked device is already assigned, guided parental-control setup asks which existing person the new rule should follow instead of requiring another tracker.
-
-Each user has its own away grace period. This can extend the base device grace for phones or watches that sleep aggressively. A device can belong to only one user, preventing accidental duplicate presence profiles.
-
-Presence polling uses:
+Client discovery uses the configured VDOM:
 
 ```text
 GET /api/v2/monitor/wifi/client?vdom=<vdom>
 ```
 
-FortiOS response fields vary between releases. The integration normalizes known MAC, IP, hostname, SSID, FortiAP, radio, band, channel, VLAN, username, and association-time fields. Missing optional fields are ignored.
+FortiOS response layouts vary. The parser accepts known nesting and field-name variations and ignores missing optional fields or malformed individual records. It normalizes MAC addresses as the stable identity; IP address, hostname, SSID, and access point may change without creating another Home Assistant device.
 
-A typical sanitized response is:
+A selected client is:
 
-```json
-{
-  "status": "success",
-  "results": [
-    {
-      "sta_mac": "AA:BB:CC:DD:EE:FF",
-      "sta_ip": "192.168.10.45",
-      "hostname": "phone",
-      "vap_name": "Home",
-      "wtp_name": "Upstairs-AP",
-      "rssi": -48,
-      "vlan": 10
-    }
-  ]
-}
-```
+- `home` immediately when its MAC appears anywhere in the valid FortiAP client result
+- still `home` while missing within the configured away timeout
+- `not_home` only after continued absence from successful API results
+- unavailable when the FortiGate request or response cannot be trusted
 
-The MAC address is the tracker's stable identity. Colon-separated, hyphenated, and compact MAC formats are normalized to the same value. Renaming a tracker does not change its unique ID.
+Roaming between FortiAPs updates connection information without changing presence. A successful empty client list is valid absence; a timeout, authentication error, TLS error, or invalid response is not.
 
-By default, an association on any FortiGate-managed SSID means home. To scope a device, enter one or more comma-separated SSIDs in its **Allowed SSIDs** field on **People & devices**. A device seen on another SSID is treated as absent and follows the normal away grace period. SSID matching is case-sensitive. API failures still make the tracker unavailable; they are never treated as an SSID mismatch.
+Each selected device can include a tracker, presence sensor, IP address, connection type, SSID, access point, first seen, last seen, and connected-since information. High-churn signal and duration sensors are disabled by default. All entities share one coordinator result, so selecting more devices does not create more FortiGate calls.
 
-### Presence rules
+Under **People**, several devices can be assigned to one aggregate person. Any device at home makes the person home. The person becomes away only after every assigned device is definitively away. An unknown member prevents a false away result.
 
-- A selected MAC seen on any managed FortiAP is `home` immediately.
-- Roaming between access points does not change presence.
-- A missing client remains `home` until the away grace period expires.
-- A successful empty response starts the normal away timer.
-- A timeout, authentication error, TLS error, invalid response, or FortiGate outage makes trackers unavailable. It does not mark them `not_home`.
-- Selected clients remain configured while offline.
+Apple devices may use private MAC addresses. Track the address FortiGate reports for the intended SSID; Apple's **Fixed Private Wi-Fi Address** mode provides a stable per-network identity without disabling the feature globally.
 
-The default polling interval is 30 seconds and the default away timeout is 300 seconds. Existing installations retain their previous timeout during migration.
+## Device history and new devices
 
-### Persistent history and new devices
+First seen, last seen, connected since, the last useful metadata, and new-device announcement state are stored in Home Assistant storage. The initial successful poll establishes a silent baseline. Later, a newly observed MAC can fire `fortigate_new_network_device` once. Restarts do not repeat the event.
 
-`first_seen`, `last_seen`, `connected_since`, the last useful network metadata, and whether a device has already been announced are stored in Home Assistant's local storage. The first successful poll after installing this version establishes a silent baseline, so existing clients do not all generate new-device events. Later, each newly observed MAC fires `fortigate_new_network_device` once with the MAC, available IP/hostname/SSID/AP/vendor, connection type, timestamp, and config-entry ID. Restarts do not repeat the event.
+The optional unknown-device sensor counts associated clients that have not been selected as trackers. Recently discovered clients are retained for a bounded, configurable period; selected trackers are retained while offline.
 
-When new-device detection is enabled, `sensor.unknown_network_devices` reports currently associated MACs that are not selected trackers. The event can be used in an automation trigger:
+## TLS
 
-```yaml
-triggers:
-  - trigger: event
-    event_type: fortigate_new_network_device
-actions:
-  - action: persistent_notification.create
-    data:
-      title: New network device
-      message: "{{ trigger.event.data.hostname or trigger.event.data.mac }} joined {{ trigger.event.data.ssid or 'Wi-Fi' }}"
-```
-
-The stored inventory is scoped by FortiGate config-entry ID plus normalized MAC, so identical MACs reported by different configured FortiGates cannot collide. Device control and wired-client providers are not included in this release; the normalized model includes connection type, interface, and source fields so they can be added without changing entity identity.
-
-Recently discovered clients are retained for a configurable number of days and then pruned from the bounded discovery list unless they are selected trackers. The native device selector is searchable and lists the last observation time when it is known.
-
-Apple devices may use a private MAC address. Track the address shown by FortiGate for the required SSID. Apple's Fixed private address mode provides a stable address without disabling Private Wi-Fi Address globally.
-
-## Parental control
-
-The integration can apply policy states directly from presence without separate Home Assistant automations. Add the person's devices and assignments on **People & devices**, then configure the verified policies and behavior on **Policies & rules**. Review the complete page before saving.
-
-For more complex installations, use **People & devices** to maintain people and **Policies & rules** to create rules involving multiple people, priorities, or schedules.
-
-For example, a user with an iPhone and Apple Watch remains home while either device is connected. Another user can independently disable policies 1 and 2 while away. Policy fields are optional, so aggregate user trackers can also be used only in Home Assistant automations.
-
-Rules are evaluated from aggregate current state rather than only on transitions. This makes them recover correctly after a restart or a manual policy change. When users' rules disagree about a shared policy, disable wins. Unknown aggregate presence or an unavailable Wi-Fi API leaves the policy unchanged. Every change still uses the normal policy preflight, status-only write, and read-back verification.
-
-### Policy automation rules
-
-For installations with several users, use **Policies & rules**. A rule contains:
-
-- one or more presence users
-- **Any user** or **All users** matching
-- required state: home or away
-- one or more target policies
-- enable or disable action
-- priority from 0 to 100
-- an optional Home Assistant `schedule` entity
-
-The integration shows a complete preview and requires confirmation before saving. A schedule that is OFF makes the rule inactive. An unavailable schedule or an unknown required presence blocks the affected policy rather than guessing.
-
-Only the highest-priority matching rules control a policy. If rules at the same winning priority request opposite states, disable wins and the conflict is exposed by the decision sensor. Existing user-attached rules continue to work at priority 0.
-
-**Configure > Advanced settings > Polling, safety, and sensors** also provides:
-
-- **Enable automatic policy enforcement**: global maintenance pause. Decisions remain visible, but no automatic policy writes occur.
-- **Dry run**: evaluate presence rules without changing FortiGate. Manual override selections remain deliberate commands and are still applied.
-- **Default manual override duration**: how long a forced or paused policy remains overridden; `0` means until changed or Home Assistant restarts.
-
-Every rule-managed policy receives:
-
-- `sensor.fortigate_policy_<id>_automation_decision`, showing the calculated action, reason, conflict, dry-run state, last application, and error
-- `select.fortigate_policy_<id>_automation_override` with Automatic, Force enabled, Force disabled, and Paused
-
-Overrides are intentionally kept in memory. A Home Assistant restart returns control to Automatic, preventing an old forced state from being silently restored. Verified changes appear in Activity and fire a `fortigate_policy_decision` event containing only the policy ID, verified state, and safe decision reason. Repeated enforcement failures create a Home Assistant Repair issue.
-
-For a one-off duration, call the **FortiAP Presence Tracker: Set policy automation override** action from Home Assistant's action UI. Supply the config entry ID, policy ID, mode, and duration in minutes. This does not require YAML.
-
-The presence entities and policy switches remain available for normal Home Assistant automations when more complex conditions are required.
-
-See [Parental control with FortiGate](docs/parental-control.md) for setup, single-device and multi-device examples, policy direction, failure behavior, and testing.
+Certificate verification is enabled by default and is recommended. Install a certificate trusted by Home Assistant whenever possible. Disabling verification still encrypts traffic but no longer verifies that Home Assistant is talking to the intended FortiGate.
 
 ## HomeKit
 
-The policy entity is a standard Home Assistant switch and can be included in HomeKit Bridge from its UI configuration. No iOS application or Focus Mode setup is required.
+Each policy entity is a normal Home Assistant switch and can be included through the HomeKit Bridge UI. No custom iOS application is required.
 
 ## Troubleshooting
 
-Enable debug logging temporarily from the integration's **Enable debug logging** menu. Download the resulting diagnostics after reproducing the problem. Tokens and client identities are excluded from integration diagnostics.
+Use the integration's **Enable debug logging** menu, reproduce the problem, then download diagnostics. Tokens and authorization headers are excluded. Client identifiers are redacted in diagnostics.
 
-Diagnostics identify `fortiap_association` as the presence source and report whether per-tracker SSID filters are in use. FortiOS version is read from the Wi-Fi response when available; otherwise the integration tries `/api/v2/monitor/system/status` once as optional diagnostic enrichment. Failure of that optional request never affects presence.
+- **401/403:** replace the token or correct the API administrator permissions.
+- **404:** check the VDOM, policy ID, and FortiOS support for the Wi-Fi monitor endpoint.
+- **Policy unavailable:** verify the saved policy still has the same ID and name.
+- **TLS failure:** install the appropriate CA certificate; disable verification only for an isolated test.
+- **No clients:** confirm the FortiGate manages the FortiAPs and the administrator can read Wireless Controller monitor data.
+- **Unexpected duplicate Apple device:** select the MAC used by the intended SSID and use a stable private-address mode.
 
-Common checks:
-
-- **401/403:** replace the API token or correct the administrator permissions.
-- **404:** check the VDOM, policy ID, and whether the Wi-Fi monitor endpoint is available in the installed FortiOS release.
-- **Policy unavailable:** confirm the policy ID and expected policy name match exactly.
-- **TLS failure:** install a trusted certificate on the FortiGate or, for an isolated test only, disable certificate verification.
-- **No clients listed:** confirm the FortiGate manages the FortiAPs and the API administrator can read Wireless Controller monitor data. You can still enter the device MAC manually on **Add or manage Wi-Fi trackers**.
-- **Duplicate phone names:** choose the MAC used on the intended SSID; private Wi-Fi addresses can create multiple records.
-
-Test Wi-Fi API access from a trusted host without putting the token in the URL:
-
-```sh
-curl --fail --silent --show-error \
-  --header "Authorization: Bearer $FORTIGATE_API_TOKEN" \
-  --header "Accept: application/json" \
-  "https://FORTIGATE_HOST:FORTIGATE_PORT/api/v2/monitor/wifi/client?vdom=FORTIGATE_VDOM"
-```
+The FortiGate device also provides **Refresh data**, which performs an immediate read of enabled features without changing firewall configuration.
 
 ## Removal
 
-Remove the config entry from **Settings > Devices & services**, then remove the integration from HACS and restart Home Assistant.
+Remove the config entry from **Settings > Devices & services**, remove the integration from HACS, and restart Home Assistant.

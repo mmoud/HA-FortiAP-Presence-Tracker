@@ -7,11 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -21,13 +19,9 @@ from .api import FortiGatePolicyApi
 from .const import (
     CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
-    CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_NETWORK_CREATE_TRACKER_ENTITIES,
     CONF_NETWORK_NEW_DEVICE_DETECTION,
     CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
-    CONF_POLICY_AUTOMATION_DRY_RUN,
-    CONF_POLICY_AUTOMATION_ENABLED,
-    CONF_POLICY_RULES_V2,
     CONF_POLL_INTERVAL,
     CONF_PRESENCE_POLICY_RULES,
     CONF_PRESENCE_USERS,
@@ -41,27 +35,16 @@ from .const import (
     DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
     DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
     DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
-    DEFAULT_OVERRIDE_MINUTES,
-    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
-    DEFAULT_POLICY_AUTOMATION_ENABLED,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
     DEFAULT_WIFI_AWAY_GRACE_PERIOD,
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
     DOMAIN,
-    OVERRIDE_MODES,
 )
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
 from .network_store import NetworkDeviceStore
 from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
-from .policy_rules import (
-    PresencePolicyRuleManager,
-    configured_policy_rules,
-    configured_presence_rules,
-    migrate_user_intents_to_policy_rules,
-    serialize_policy_rules,
-)
 from .presence_users import (
     configured_presence_users,
     migrate_tracker_rules_to_users,
@@ -75,7 +58,6 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SENSOR,
     Platform.BUTTON,
-    Platform.SELECT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -86,7 +68,6 @@ class FortiGateRuntimeData:
 
     policy_coordinators: dict[str, FortiGatePolicyCoordinator]
     wifi_coordinator: FortiGateWifiCoordinator | None
-    rule_manager: PresencePolicyRuleManager | None
     network_store: NetworkDeviceStore | None
 
 
@@ -94,44 +75,12 @@ type FortiGatePolicyConfigEntry = ConfigEntry[FortiGateRuntimeData]
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Register the management panel and manual override action."""
+    """Register the management panel."""
 
     from .panel import async_register_panel
 
     await async_register_panel(hass)
 
-    async def async_set_policy_override(call: ServiceCall) -> None:
-        entry_id = call.data["config_entry_id"]
-        entry = hass.config_entries.async_get_entry(entry_id)
-        if entry is None or entry.domain != DOMAIN:
-            raise ServiceValidationError("FortiGate config entry was not found")
-        runtime = getattr(entry, "runtime_data", None)
-        manager = getattr(runtime, "rule_manager", None)
-        if manager is None:
-            raise ServiceValidationError(
-                "This entry has no active presence policy rules"
-            )
-        await manager.async_set_override(
-            call.data["policy_id"],
-            call.data["mode"],
-            call.data.get("duration_minutes"),
-        )
-
-    hass.services.async_register(
-        DOMAIN,
-        "set_policy_override",
-        async_set_policy_override,
-        schema=vol.Schema(
-            {
-                vol.Required("config_entry_id"): str,
-                vol.Required("policy_id"): str,
-                vol.Required("mode"): vol.In(OVERRIDE_MODES),
-                vol.Optional("duration_minutes"): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=1440)
-                ),
-            }
-        ),
-    )
     return True
 
 
@@ -229,6 +178,11 @@ def _cleanup_stale_wifi_registry_entries(
                 entity.platform == DOMAIN
                 and entity.unique_id == f"{entry_id}_unknown_network_devices"
                 and not retain_unknown_sensor
+            )
+            or (
+                entity.platform == DOMAIN
+                and entity.unique_id.startswith(f"{entry_id}_policy_")
+                and entity.unique_id.endswith(("_decision", "_override"))
             )
         ):
             entity_registry.async_remove(entity.entity_id)
@@ -359,46 +313,10 @@ async def async_setup_entry(
                 DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
             ),
         )
-    rule_manager: PresencePolicyRuleManager | None = None
-    if wifi_coordinator is not None and policy_coordinators:
-        legacy_rules = configured_presence_rules(
-            entry.options,
-            tracked_macs,
-            set(policy_coordinators),
-        )
-        policy_rules = configured_policy_rules(
-            entry.options,
-            {user.user_id for user in presence_users},
-            set(policy_coordinators),
-        )
-        if legacy_rules or policy_rules:
-            rule_manager = PresencePolicyRuleManager(
-                hass,
-                wifi_coordinator,
-                policy_coordinators,
-                legacy_rules,
-                users=presence_users,
-                policy_rules=policy_rules,
-                automation_enabled=entry.options.get(
-                    CONF_POLICY_AUTOMATION_ENABLED,
-                    DEFAULT_POLICY_AUTOMATION_ENABLED,
-                ),
-                dry_run=entry.options.get(
-                    CONF_POLICY_AUTOMATION_DRY_RUN,
-                    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
-                ),
-                default_override_minutes=entry.options.get(
-                    CONF_DEFAULT_OVERRIDE_MINUTES, DEFAULT_OVERRIDE_MINUTES
-                ),
-            )
     entry.runtime_data = FortiGateRuntimeData(
-        policy_coordinators, wifi_coordinator, rule_manager, network_store
+        policy_coordinators, wifi_coordinator, network_store
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    if rule_manager is not None:
-        for unsubscribe in rule_manager.async_start():
-            entry.async_on_unload(unsubscribe)
-        entry.async_on_unload(rule_manager.async_stop)
     if wifi_coordinator is not None:
         # This is intentionally after device tracker setup: RestoreEntity can
         # seed a former home/not_home state before the first valid monitor
@@ -412,9 +330,10 @@ async def async_migrate_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
     """Migrate entries without changing entity identity."""
-    if entry.version > 7:
+    if entry.version > 8:
         return False
     data = dict(entry.data)
+    migrated_options: dict[str, Any] | None = None
     if entry.version == 1:
         data = migrate_v1_data(data)
     if entry.version < 4:
@@ -443,45 +362,26 @@ async def async_migrate_entry(
             title=fortigate_entry_title(data),
             version=5,
         )
+        migrated_options = options
     if entry.version < 6:
-        options = dict(entry.options)
+        options = dict(
+            migrated_options if migrated_options is not None else entry.options
+        )
         raw_users = options.get(CONF_PRESENCE_USERS, {})
         if not isinstance(raw_users, Mapping):
             raw_users = {}
         policy_ids = {policy.policy_id for policy in configured_policies(data)}
-        migrated_rules = migrate_user_intents_to_policy_rules(raw_users, policy_ids)
-        existing_rules = options.get(CONF_POLICY_RULES_V2, {})
-        if isinstance(existing_rules, Mapping):
-            migrated_rules.update(existing_rules)
-        users_without_intents = {
-            user_id: {
-                **raw_user,
-                "home_enable_policies": [],
-                "home_disable_policies": [],
-                "away_enable_policies": [],
-                "away_disable_policies": [],
-            }
-            for user_id, raw_user in raw_users.items()
-            if isinstance(user_id, str) and isinstance(raw_user, Mapping)
-        }
         options[CONF_PRESENCE_USERS] = serialize_presence_users(
-            users_without_intents,
+            raw_users,
             tracked_macs_from_options(options),
-            policy_ids,
-        )
-        users = configured_presence_users(
-            options,
-            tracked_macs_from_options(options),
-            policy_ids,
-        )
-        options[CONF_POLICY_RULES_V2] = serialize_policy_rules(
-            migrated_rules,
-            {user.user_id for user in users},
             policy_ids,
         )
         hass.config_entries.async_update_entry(entry, options=options, version=6)
+        migrated_options = options
     if entry.version < 7:
-        options = dict(entry.options)
+        options = dict(
+            migrated_options if migrated_options is not None else entry.options
+        )
         # Preserve the previous 180-second behavior for existing installations;
         # 300 seconds is only the default for new entries.
         options.setdefault(CONF_WIFI_AWAY_GRACE_PERIOD, 180)
@@ -497,6 +397,26 @@ async def async_migrate_entry(
             DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
         )
         hass.config_entries.async_update_entry(entry, options=options, version=7)
+        migrated_options = options
+    if entry.version < 8:
+        options = dict(
+            migrated_options if migrated_options is not None else entry.options
+        )
+        for key in (
+            "policy_rules_v2",
+            "presence_policy_rules",
+            "policy_automation_enabled",
+            "policy_automation_dry_run",
+            "default_override_minutes",
+        ):
+            options.pop(key, None)
+        raw_users = options.get(CONF_PRESENCE_USERS, {})
+        options[CONF_PRESENCE_USERS] = serialize_presence_users(
+            raw_users if isinstance(raw_users, Mapping) else {},
+            tracked_macs_from_options(options),
+            set(),
+        )
+        hass.config_entries.async_update_entry(entry, options=options, version=8)
     return True
 
 

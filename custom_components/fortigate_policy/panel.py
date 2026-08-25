@@ -21,24 +21,12 @@ from .api import FortiGateError, FortiGatePolicyApi
 from .const import (
     CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
-    CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
     CONF_NETWORK_CREATE_TRACKER_ENTITIES,
     CONF_NETWORK_NEW_DEVICE_DETECTION,
     CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICIES,
-    CONF_POLICY_AUTOMATION_DRY_RUN,
-    CONF_POLICY_AUTOMATION_ENABLED,
-    CONF_POLICY_RULE_ACTION,
-    CONF_POLICY_RULE_MATCH,
-    CONF_POLICY_RULE_NAME,
-    CONF_POLICY_RULE_POLICIES,
-    CONF_POLICY_RULE_PRESENCE,
-    CONF_POLICY_RULE_PRIORITY,
-    CONF_POLICY_RULE_SCHEDULE,
-    CONF_POLICY_RULE_USERS,
-    CONF_POLICY_RULES_V2,
     CONF_POLL_INTERVAL,
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
@@ -56,9 +44,6 @@ from .const import (
     DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
     DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
     DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
-    DEFAULT_OVERRIDE_MINUTES,
-    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
-    DEFAULT_POLICY_AUTOMATION_ENABLED,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
     DEFAULT_USER_AWAY_GRACE_PERIOD,
@@ -67,7 +52,6 @@ from .const import (
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
     DOMAIN,
-    MAX_OVERRIDE_MINUTES,
     MAX_POLL_INTERVAL,
     MAX_RECENT_CLIENT_RETENTION_DAYS,
     MAX_USER_AWAY_GRACE_PERIOD,
@@ -86,13 +70,12 @@ from .policy_config import (
     fortigate_entry_title,
     serialize_policies,
 )
-from .policy_rules import configured_policy_rules, serialize_policy_rules
 from .presence_users import configured_presence_users, serialize_presence_users
 from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-PANEL_VERSION = "3.5.1"
+PANEL_VERSION = "3.6.0"
 FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
 
 _LOGGER = logging.getLogger(__name__)
@@ -185,9 +168,6 @@ def _panel_data(entry) -> dict[str, Any]:
     policy_ids = {policy.policy_id for policy in configured_policies(entry.data)}
     tracked_macs = {tracker["mac"] for tracker in trackers}
     users = configured_presence_users(options, tracked_macs, policy_ids)
-    rules = configured_policy_rules(
-        options, {user.user_id for user in users}, policy_ids
-    )
     runtime = entry.runtime_data
     network_store = getattr(runtime, "network_store", None)
     recent = options.get(CONF_RECENT_WIFI_CLIENTS, {})
@@ -255,15 +235,6 @@ def _panel_data(entry) -> dict[str, Any]:
                 CONF_NETWORK_NEW_DEVICE_DETECTION,
                 DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
             ),
-            CONF_POLICY_AUTOMATION_ENABLED: options.get(
-                CONF_POLICY_AUTOMATION_ENABLED, DEFAULT_POLICY_AUTOMATION_ENABLED
-            ),
-            CONF_POLICY_AUTOMATION_DRY_RUN: options.get(
-                CONF_POLICY_AUTOMATION_DRY_RUN, DEFAULT_POLICY_AUTOMATION_DRY_RUN
-            ),
-            CONF_DEFAULT_OVERRIDE_MINUTES: options.get(
-                CONF_DEFAULT_OVERRIDE_MINUTES, DEFAULT_OVERRIDE_MINUTES
-            ),
             CONF_RECENT_CLIENT_RETENTION_DAYS: options.get(
                 CONF_RECENT_CLIENT_RETENTION_DAYS,
                 DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
@@ -292,20 +263,6 @@ def _panel_data(entry) -> dict[str, Any]:
             }
             for policy in configured_policies(entry.data)
         ],
-        "rules": [
-            {
-                "id": rule.rule_id,
-                "name": rule.name,
-                "users": sorted(rule.user_ids),
-                "match": rule.match,
-                "presence": rule.presence,
-                "action": rule.action,
-                "policies": sorted(rule.policy_ids),
-                "priority": rule.priority,
-                "schedule": rule.schedule_entity_id or "",
-            }
-            for rule in rules
-        ],
         "known_ssids": sorted(known_ssids, key=str.casefold),
         "recent_clients": [
             {"mac": mac, **dict(metadata)}
@@ -330,9 +287,6 @@ def _panel_data(entry) -> dict[str, Any]:
                 runtime.wifi_coordinator.data.fortios_version
                 if runtime.wifi_coordinator and runtime.wifi_coordinator.data
                 else None
-            ),
-            "automation_error": (
-                runtime.rule_manager.last_error if runtime.rule_manager else None
             ),
             "known_network_devices": (
                 len(network_store.records) if network_store else 0
@@ -456,17 +410,16 @@ async def websocket_set_policy_status(
 
 def _raw_configuration(
     msg_config: Mapping[str, Any],
-) -> tuple[list[object], list[object], list[object], dict[str, Any], list[object]]:
+) -> tuple[list[object], list[object], dict[str, Any], list[object]]:
     trackers = msg_config.get("trackers", [])
     users = msg_config.get("users", [])
-    rules = msg_config.get("rules", [])
     settings = msg_config.get("settings", {})
     policies = msg_config.get("policy_ids", [])
-    if not all(isinstance(value, list) for value in (trackers, users, rules, policies)):
-        raise TypeError("Trackers, people, rules, and policies must be lists")
+    if not all(isinstance(value, list) for value in (trackers, users, policies)):
+        raise TypeError("Trackers, people, and policies must be lists")
     if not isinstance(settings, Mapping):
         raise TypeError("Settings must be an object")
-    return trackers, users, rules, dict(settings), policies
+    return trackers, users, dict(settings), policies
 
 
 async def _validate_policies(
@@ -505,7 +458,6 @@ def _normalize_configuration(
     entry,
     trackers_raw: list[object],
     users_raw: list[object],
-    rules_raw: list[object],
     settings_raw: Mapping[str, Any],
     policies: tuple[PolicyDefinition, ...],
 ) -> dict[str, Any]:
@@ -560,31 +512,11 @@ def _normalize_configuration(
     if len(users) != len(users_raw):
         raise ValueError("Every person needs a name and at least one tracked device")
 
-    rules_map: dict[str, object] = {}
-    for raw in rules_raw:
-        if not isinstance(raw, Mapping):
-            raise TypeError("Each policy rule must be an object")
-        rule_id = str(raw.get("id") or uuid4())
-        rules_map[rule_id] = {
-            CONF_POLICY_RULE_NAME: raw.get("name"),
-            CONF_POLICY_RULE_USERS: raw.get("users", []),
-            CONF_POLICY_RULE_MATCH: raw.get("match"),
-            CONF_POLICY_RULE_PRESENCE: raw.get("presence"),
-            CONF_POLICY_RULE_ACTION: raw.get("action"),
-            CONF_POLICY_RULE_POLICIES: raw.get("policies", []),
-            CONF_POLICY_RULE_PRIORITY: raw.get("priority", 50),
-            CONF_POLICY_RULE_SCHEDULE: raw.get("schedule", ""),
-        }
-    rules = serialize_policy_rules(rules_map, set(users), policy_ids)
-    if len(rules) != len(rules_raw):
-        raise ValueError("Every rule needs valid people, policies, and behavior")
-
     options = dict(entry.options)
     options.update(
         {
             CONF_TRACKED_CLIENTS: tracked,
             CONF_PRESENCE_USERS: users,
-            CONF_POLICY_RULES_V2: rules,
             CONF_POLL_INTERVAL: _bounded_int(
                 settings_raw.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
                 MIN_POLL_INTERVAL,
@@ -604,14 +536,6 @@ def _normalize_configuration(
                 MIN_WIFI_AWAY_GRACE_PERIOD,
                 MAX_WIFI_AWAY_GRACE_PERIOD,
                 "Away grace period",
-            ),
-            CONF_DEFAULT_OVERRIDE_MINUTES: _bounded_int(
-                settings_raw.get(
-                    CONF_DEFAULT_OVERRIDE_MINUTES, DEFAULT_OVERRIDE_MINUTES
-                ),
-                0,
-                MAX_OVERRIDE_MINUTES,
-                "Override duration",
             ),
             CONF_RECENT_CLIENT_RETENTION_DAYS: _bounded_int(
                 settings_raw.get(
@@ -655,20 +579,6 @@ def _normalize_configuration(
                 ),
                 "New network device detection",
             ),
-            CONF_POLICY_AUTOMATION_ENABLED: _boolean(
-                settings_raw.get(
-                    CONF_POLICY_AUTOMATION_ENABLED,
-                    DEFAULT_POLICY_AUTOMATION_ENABLED,
-                ),
-                "Policy automation",
-            ),
-            CONF_POLICY_AUTOMATION_DRY_RUN: _boolean(
-                settings_raw.get(
-                    CONF_POLICY_AUTOMATION_DRY_RUN,
-                    DEFAULT_POLICY_AUTOMATION_DRY_RUN,
-                ),
-                "Policy dry run",
-            ),
         }
     )
     return options
@@ -691,11 +601,9 @@ async def websocket_save_panel(
     """Validate and atomically save the full management page."""
     try:
         entry = _entry(hass, msg["entry_id"])
-        trackers, users, rules, settings, policy_ids = _raw_configuration(msg["config"])
+        trackers, users, settings, policy_ids = _raw_configuration(msg["config"])
         policies = await _validate_policies(hass, entry, policy_ids)
-        options = _normalize_configuration(
-            entry, trackers, users, rules, settings, policies
-        )
+        options = _normalize_configuration(entry, trackers, users, settings, policies)
     except FortiGateError:
         connection.send_error(
             msg["id"],

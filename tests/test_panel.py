@@ -213,6 +213,16 @@ class TestPanelFrontend(unittest.TestCase):
         self.assertIn('data-action="set-policy"', source)
         self.assertIn("panel/policy/set", source)
 
+    def test_automation_tab_links_to_native_home_assistant_workflows(self) -> None:
+        source = FRONTEND.read_text(encoding="utf-8")
+
+        self.assertIn('["automations","Automations","source-branch"]', source)
+        self.assertIn("my.home-assistant.io/redirect/blueprint_import", source)
+        self.assertIn("policy_by_presence.yaml", source)
+        self.assertIn('href="/config/automation/dashboard"', source)
+        self.assertIn('href="/config/blueprint/dashboard"', source)
+        self.assertIn("Unavailable and unknown states never run", source)
+
 
 class TestPanelValidation(unittest.TestCase):
     """Full-page saves preserve the same server-side safety boundaries."""

@@ -1,0 +1,121 @@
+blueprint:
+  name: FortiAP presence policy control
+  description: >-
+    Enable or disable one or more verified FortiGate policy switches when a
+    FortiAP Presence Tracker device or person arrives or leaves. Unavailable
+    and unknown presence states do not run either action.
+  domain: automation
+  author: mmoud
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    presence_entity:
+      name: Person or device presence
+      description: Select a FortiAP person or device presence entity.
+      selector:
+        entity:
+          filter:
+            - integration: fortigate_policy
+              domain: device_tracker
+            - integration: fortigate_policy
+              domain: binary_sensor
+              device_class: presence
+    policy_switches:
+      name: FortiGate policy switches
+      description: Select one or more verified firewall-policy switches.
+      selector:
+        target:
+          entity:
+            - integration: fortigate_policy
+              domain: switch
+    home_policy_state:
+      name: When presence is home
+      default: enable
+      selector:
+        select:
+          options:
+            - label: Enable policies
+              value: enable
+            - label: Disable policies
+              value: disable
+    away_policy_state:
+      name: When presence is away
+      default: disable
+      selector:
+        select:
+          options:
+            - label: Disable policies
+              value: disable
+            - label: Enable policies
+              value: enable
+    schedule_entity:
+      name: Schedule (optional)
+      description: Actions run only while this Schedule helper is on.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: schedule
+
+triggers:
+  - trigger: state
+    entity_id: !input presence_entity
+    to: "home"
+    id: home
+  - trigger: state
+    entity_id: !input presence_entity
+    to: "on"
+    id: home
+  - trigger: state
+    entity_id: !input presence_entity
+    to: "not_home"
+    id: away
+  - trigger: state
+    entity_id: !input presence_entity
+    to: "off"
+    id: away
+
+variables:
+  configured_schedule: !input schedule_entity
+  configured_home_state: !input home_policy_state
+  configured_away_state: !input away_policy_state
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ configured_schedule == '' or is_state(configured_schedule, 'on') }}
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'home' and configured_home_state == 'enable' }}
+        sequence:
+          - action: switch.turn_on
+            target: !input policy_switches
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'home' and configured_home_state == 'disable' }}
+        sequence:
+          - action: switch.turn_off
+            target: !input policy_switches
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'away' and configured_away_state == 'enable' }}
+        sequence:
+          - action: switch.turn_on
+            target: !input policy_switches
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'away' and configured_away_state == 'disable' }}
+        sequence:
+          - action: switch.turn_off
+            target: !input policy_switches
+
+mode: queued
+max: 10
+max_exceeded: silent

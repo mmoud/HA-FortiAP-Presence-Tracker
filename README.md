@@ -17,6 +17,7 @@ The two features are independent. Use presence only, policy switches only, or co
 - persistent first seen, last seen, connection, and network metadata
 - optional new-device event, unknown-device sensor, and client-count sensor
 - one verified switch per configured FortiGate policy
+- importable presence-to-policy automation blueprint
 - full configuration through a responsive Home Assistant panel
 - centralized polling with one bulk client request per refresh
 
@@ -51,7 +52,9 @@ Disable network tracking and add one or more existing policy IDs under **Policy 
 
 Configure both features, then create Home Assistant automations that use a tracker as the trigger and a policy switch as the action. This keeps schedules, conditions, traces, notifications, and manual exceptions in Home Assistant's standard automation system.
 
-See [Policy control with Home Assistant automations](docs/parental-control.md) for step-by-step GUI examples. It covers arrival, departure, multiple devices, multiple policies, several people, schedules, testing, and failure safety. The examples do not require editing YAML.
+The **Automations** tab provides a one-click blueprint import and links to Home Assistant's automation editor. The blueprint supports a person or device presence entity, multiple policy switches, independent at-home and away actions, and an optional Schedule helper. Importing it does not create or activate an automation; Home Assistant shows a normal form where you choose the entities and save each automation you want.
+
+See [Policy control with Home Assistant automations](docs/parental-control.md) for the blueprint workflow and manual GUI alternatives. No YAML editing is required.
 
 ## FortiGate API account
 

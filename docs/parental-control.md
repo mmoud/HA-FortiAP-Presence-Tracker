@@ -18,6 +18,23 @@ This makes schedules, multiple people, manual exceptions, notifications, and oth
 
 Use a dedicated, non-critical policy while testing. The integration changes only its `status`; it does not alter addresses, services, action, NAT, schedule, interfaces, logging, or order.
 
+## Recommended: use the included blueprint
+
+1. Open **FortiAP Presence > Automations**.
+2. Select **Import blueprint**, preview it in Home Assistant, then select **Import**. This installs a reusable template; it does not activate any policy control.
+3. Select **Create automation** for **FortiAP presence policy control**.
+4. Choose one person or device presence entity.
+5. Choose one or more FortiGate policy switches.
+6. Choose whether those policies should be enabled or disabled while home and while away.
+7. Optionally select a Schedule helper. Leave it empty for all-day operation.
+8. Name, save, and enable the automation.
+
+Create another automation from the same blueprint for each person or policy group that needs different behavior. The entity selectors show only compatible FortiAP presence entities and FortiGate policy switches.
+
+The blueprint reacts only to exact `home`, `not_home`, `on`, or `off` transitions. `unknown` and `unavailable` do not run an action. The integration's away timeout is applied before the presence entity becomes away.
+
+The manual examples below are useful when you need conditions or actions beyond the blueprint.
+
 ## Enable a policy when someone arrives
 
 1. Open **Settings > Automations & scenes**.

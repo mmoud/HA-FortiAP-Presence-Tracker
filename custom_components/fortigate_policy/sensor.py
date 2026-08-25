@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import UnitOfSignalStrength, UnitOfTime
+from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -176,7 +176,7 @@ NETWORK_SENSOR_DESCRIPTIONS = (
         key="signal_strength",
         icon="mdi:wifi-strength-2",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
-        unit=UnitOfSignalStrength.DECIBELS_MILLIWATT,
+        unit=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         enabled=False,
         value=lambda _record, presence: (
             presence.client.rssi if presence and presence.client else None

@@ -10,6 +10,8 @@ It provides:
 
 - an optional verified switch for each configured firewall policy
 - `device_tracker` and presence `binary_sensor` entities for selected Wi-Fi clients
+- persistent first-seen, last-seen, connection, and network metadata per client
+- one-time new-device events and an unknown-device count sensor
 - multi-device presence users for phones, watches, and tablets
 - policy-centric ANY/ALL rules with priorities and optional Schedule helpers
 - dry-run mode, expiring policy overrides, and per-policy decision sensors
@@ -38,14 +40,14 @@ The FortiGate device includes a **Refresh data** button. It requests an immediat
 
 ## Choose an operating mode
 
-Policy control and Wi-Fi presence tracking are independent. Use only the features needed for the installation.
+Policy control and network presence tracking are independent. Use only the features needed for the installation.
 
 ### Policy-only mode
 
 Use this mode when Home Assistant should provide normal switches for existing FortiGate policies without creating Wi-Fi trackers or people.
 
 1. Open **Settings > Devices & services > FortiAP Presence Tracker > Configure**.
-2. Under **Settings**, turn off **Enable Wi-Fi presence tracking**.
+2. Under **Settings**, turn off **Enable network device tracking**.
 3. Under **Policies & rules**, add one or more existing FortiGate policy IDs.
 4. Leave people and presence rules empty, then select **Save changes**.
 
@@ -58,7 +60,7 @@ Policy-only mode does not call the FortiGate Wi-Fi client endpoint and does not 
 Use this mode for `device_tracker` and presence `binary_sensor` entities without allowing the integration to modify firewall policies.
 
 1. Leave the firewall policy list empty.
-2. Enable Wi-Fi presence tracking under **Settings**.
+2. Enable network device tracking under **Settings**.
 3. Add trackers and optional multi-device people under **People & devices**.
 4. Leave policy rules empty and save.
 
@@ -105,7 +107,7 @@ Before a write, the integration reads the selected policy and checks its ID and 
 
 TLS certificate verification is enabled by default. Disable it only when the FortiGate uses a certificate that Home Assistant cannot validate. With verification disabled, the connection is encrypted but the FortiGate's identity is not verified.
 
-## Wi-Fi presence tracking
+## Network Device Presence+
 
 Open **Settings > Devices & services > FortiAP Presence Tracker** and select **Configure**. Version 3 provides a full-width management page instead of placing normal administration in a sequence of small dialogs. The same page is also available from **FortiAP Presence** in the Home Assistant sidebar.
 
@@ -124,12 +126,16 @@ Disabling Wi-Fi tracking is reversible and retains the selected devices. Remove 
 
 Use **Policies & rules** to add or remove policy IDs. The integration verifies every policy and its existing name guard before saving the change.
 
-On the tracker screen, enable Wi-Fi presence tracking, select one or more devices, and save. Only newly selected devices ask for a friendly name; existing names are preserved. Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. Each selected MAC creates two entities:
+On the tracker screen, enable network device tracking, select one or more devices, and save. Only newly selected devices ask for a friendly name; existing names are preserved. Client selection combines the current FortiAP association list with available FortiGate device-detection and DHCP information. Unselected clients remain in the bounded discovery inventory but do not create a Device Registry entry, preventing entity floods on guest networks.
+
+Each selected MAC creates one Home Assistant Device Registry device containing:
 
 - `device_tracker.<device_name>` with `home`, `not_home`, or unavailable state
 - `binary_sensor.<device_name>_presence`, which is ON at home, OFF when away, and unavailable during a FortiGate/API failure
+- IP address, connection type, SSID, access point, first seen, last seen, and connected-since sensors
+- connection duration and signal-strength sensors, disabled by default to reduce recorder churn
 
-Both entities use the same coordinator result and away grace period. The binary sensor does not add another FortiGate request.
+All entities use the same coordinator result; adding devices or enabling detail sensors does not add FortiGate requests. VLAN, interface, FortiAP serial, band, channel, and FortiGate-reported manufacturer are exposed only when available. No Internet OUI lookup is performed.
 
 On **People & devices**, assign a phone, watch, tablet, or other selected trackers to one person. Home Assistant creates an aggregate `device_tracker.<user>` and `binary_sensor.<user>_presence`. The person is home as soon as any assigned device is home. The person becomes away only after every assigned device is definitively away and has completed its own grace period. If no device is home and any member state is unknown, the person is unavailable rather than away.
 
@@ -145,6 +151,25 @@ GET /api/v2/monitor/wifi/client?vdom=<vdom>
 
 FortiOS response fields vary between releases. The integration normalizes known MAC, IP, hostname, SSID, FortiAP, radio, band, channel, VLAN, username, and association-time fields. Missing optional fields are ignored.
 
+A typical sanitized response is:
+
+```json
+{
+  "status": "success",
+  "results": [
+    {
+      "sta_mac": "AA:BB:CC:DD:EE:FF",
+      "sta_ip": "192.168.10.45",
+      "hostname": "phone",
+      "vap_name": "Home",
+      "wtp_name": "Upstairs-AP",
+      "rssi": -48,
+      "vlan": 10
+    }
+  ]
+}
+```
+
 The MAC address is the tracker's stable identity. Colon-separated, hyphenated, and compact MAC formats are normalized to the same value. Renaming a tracker does not change its unique ID.
 
 By default, an association on any FortiGate-managed SSID means home. To scope a device, enter one or more comma-separated SSIDs in its **Allowed SSIDs** field on **People & devices**. A device seen on another SSID is treated as absent and follows the normal away grace period. SSID matching is case-sensitive. API failures still make the tracker unavailable; they are never treated as an SSID mismatch.
@@ -158,7 +183,26 @@ By default, an association on any FortiGate-managed SSID means home. To scope a 
 - A timeout, authentication error, TLS error, invalid response, or FortiGate outage makes trackers unavailable. It does not mark them `not_home`.
 - Selected clients remain configured while offline.
 
-The default polling interval is 30 seconds and the default away grace period is 180 seconds.
+The default polling interval is 30 seconds and the default away timeout is 300 seconds. Existing installations retain their previous timeout during migration.
+
+### Persistent history and new devices
+
+`first_seen`, `last_seen`, `connected_since`, the last useful network metadata, and whether a device has already been announced are stored in Home Assistant's local storage. The first successful poll after installing this version establishes a silent baseline, so existing clients do not all generate new-device events. Later, each newly observed MAC fires `fortigate_new_network_device` once with the MAC, available IP/hostname/SSID/AP/vendor, connection type, timestamp, and config-entry ID. Restarts do not repeat the event.
+
+When new-device detection is enabled, `sensor.unknown_network_devices` reports currently associated MACs that are not selected trackers. The event can be used in an automation trigger:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: fortigate_new_network_device
+actions:
+  - action: persistent_notification.create
+    data:
+      title: New network device
+      message: "{{ trigger.event.data.hostname or trigger.event.data.mac }} joined {{ trigger.event.data.ssid or 'Wi-Fi' }}"
+```
+
+The stored inventory is scoped by FortiGate config-entry ID plus normalized MAC, so identical MACs reported by different configured FortiGates cannot collide. Device control and wired-client providers are not included in this release; the normalized model includes connection type, interface, and source fields so they can be added without changing entity identity.
 
 Recently discovered clients are retained for a configurable number of days and then pruned from the bounded discovery list unless they are selected trackers. The native device selector is searchable and lists the last observation time when it is known.
 

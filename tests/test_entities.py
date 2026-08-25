@@ -12,6 +12,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 
 from custom_components.fortigate_policy import (
     _cleanup_stale_wifi_registry_entries,
+    async_migrate_entry,
     async_setup_entry,
     tracked_ssid_filters_from_options,
 )
@@ -37,6 +38,9 @@ from custom_components.fortigate_policy.const import (
     CONF_API_TOKEN,
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_NETWORK_NEW_DEVICE_DETECTION,
+    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICIES,
     CONF_POLICY_AUTOMATION_DRY_RUN,
     CONF_POLICY_AUTOMATION_ENABLED,
@@ -589,6 +593,23 @@ class TestPolicyOptions(unittest.TestCase):
         self.assertEqual({}, entry.runtime_data.policy_coordinators)
         self.assertIsNone(entry.runtime_data.wifi_coordinator)
         self.assertTrue(config_entries.forwarded)
+
+    def test_version_six_migration_preserves_old_away_default(self) -> None:
+        updates = []
+        hass = SimpleNamespace(
+            config_entries=SimpleNamespace(
+                async_update_entry=lambda _entry, **values: updates.append(values)
+            )
+        )
+        entry = SimpleNamespace(version=6, data={CONF_POLICIES: []}, options={})
+
+        self.assertTrue(asyncio.run(async_migrate_entry(hass, entry)))
+        migrated = updates[-1]
+        self.assertEqual(7, migrated["version"])
+        self.assertEqual(180, migrated["options"]["wifi_away_grace_period"])
+        self.assertTrue(migrated["options"][CONF_NETWORK_TRACK_FORTIAP_CLIENTS])
+        self.assertTrue(migrated["options"][CONF_NETWORK_CREATE_TRACKER_ENTITIES])
+        self.assertTrue(migrated["options"][CONF_NETWORK_NEW_DEVICE_DETECTION])
 
 
 class TestPolicySwitchEntities(unittest.TestCase):

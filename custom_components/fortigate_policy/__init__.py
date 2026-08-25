@@ -22,23 +22,30 @@ from .const import (
     CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
     CONF_DEFAULT_OVERRIDE_MINUTES,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_NETWORK_NEW_DEVICE_DETECTION,
+    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICY_AUTOMATION_DRY_RUN,
     CONF_POLICY_AUTOMATION_ENABLED,
     CONF_POLICY_RULES_V2,
     CONF_POLL_INTERVAL,
     CONF_PRESENCE_POLICY_RULES,
     CONF_PRESENCE_USERS,
+    CONF_RECENT_CLIENT_RETENTION_DAYS,
     CONF_TRACKED_CLIENTS,
     CONF_VDOM,
     CONF_VERIFY_SSL,
     CONF_WIFI_AWAY_GRACE_PERIOD,
-    CONF_WIFI_CLIENT_COUNT_SENSOR,
     CONF_WIFI_POLL_INTERVAL,
     CONF_WIFI_TRACKING_ENABLED,
+    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+    DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+    DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
     DEFAULT_OVERRIDE_MINUTES,
     DEFAULT_POLICY_AUTOMATION_DRY_RUN,
     DEFAULT_POLICY_AUTOMATION_ENABLED,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
     DEFAULT_WIFI_AWAY_GRACE_PERIOD,
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
@@ -46,6 +53,7 @@ from .const import (
     OVERRIDE_MODES,
 )
 from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
+from .network_store import NetworkDeviceStore
 from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
 from .policy_rules import (
     PresencePolicyRuleManager,
@@ -79,6 +87,7 @@ class FortiGateRuntimeData:
     policy_coordinators: dict[str, FortiGatePolicyCoordinator]
     wifi_coordinator: FortiGateWifiCoordinator | None
     rule_manager: PresencePolicyRuleManager | None
+    network_store: NetworkDeviceStore | None
 
 
 type FortiGatePolicyConfigEntry = ConfigEntry[FortiGateRuntimeData]
@@ -161,21 +170,33 @@ def tracked_ssid_filters_from_options(
     return filters
 
 
+def tracked_names_from_options(options: Mapping[str, Any]) -> dict[str, str]:
+    """Return persistent user-assigned names indexed by normalized MAC."""
+    raw_clients = options.get(CONF_TRACKED_CLIENTS, {})
+    if not isinstance(raw_clients, Mapping):
+        return {}
+    names: dict[str, str] = {}
+    for raw_mac, metadata in raw_clients.items():
+        mac = normalize_mac(raw_mac)
+        if mac is None or not isinstance(metadata, Mapping):
+            continue
+        name = metadata.get("friendly_name")
+        if isinstance(name, str) and name.strip():
+            names[mac] = name.strip()
+    return names
+
+
 def _cleanup_stale_wifi_registry_entries(
     hass: HomeAssistant,
     entry_id: str,
     tracked_macs: set[str],
     presence_user_ids: set[str] | None = None,
+    retain_unknown_sensor: bool = True,
 ) -> None:
     """Remove tracker entities and devices no longer selected in Options."""
     prefix = f"{entry_id}_wifi_"
-    retained_entity_unique_ids = {
-        unique_id
-        for mac in tracked_macs
-        for unique_id in (
-            f"{prefix}{mac.replace(':', '')}",
-            f"{prefix}{mac.replace(':', '')}_presence",
-        )
+    retained_entity_prefixes = {
+        f"{prefix}{mac.replace(':', '')}" for mac in tracked_macs
     }
     presence_user_ids = presence_user_ids or set()
     user_prefix = f"{entry_id}_presence_user_"
@@ -190,13 +211,25 @@ def _cleanup_stale_wifi_registry_entries(
     entity_registry = er.async_get(hass)
     for entity in er.async_entries_for_config_entry(entity_registry, entry_id):
         if (
-            entity.platform == DOMAIN
-            and entity.unique_id.startswith(prefix)
-            and entity.unique_id not in retained_entity_unique_ids
-        ) or (
-            entity.platform == DOMAIN
-            and entity.unique_id.startswith(user_prefix)
-            and entity.unique_id not in retained_user_unique_ids
+            (
+                entity.platform == DOMAIN
+                and entity.unique_id.startswith(prefix)
+                and not any(
+                    entity.unique_id == retained
+                    or entity.unique_id.startswith(f"{retained}_")
+                    for retained in retained_entity_prefixes
+                )
+            )
+            or (
+                entity.platform == DOMAIN
+                and entity.unique_id.startswith(user_prefix)
+                and entity.unique_id not in retained_user_unique_ids
+            )
+            or (
+                entity.platform == DOMAIN
+                and entity.unique_id == f"{entry_id}_unknown_network_devices"
+                and not retain_unknown_sensor
+            )
         ):
             entity_registry.async_remove(entity.entity_id)
 
@@ -214,6 +247,14 @@ def _cleanup_stale_wifi_registry_entries(
             retained_device_identifiers
         ):
             device_registry.async_remove_device(device.id)
+        elif wifi_identifiers and getattr(device, "config_entries", {entry_id}) == {
+            entry_id
+        }:
+            # Older releases advertised a global MAC connection, which can
+            # merge one client across separate FortiGate config entries.
+            connections = getattr(device, "connections", set())
+            if any(kind == dr.CONNECTION_NETWORK_MAC for kind, _ in connections):
+                device_registry.async_update_device(device.id, new_connections=set())
 
 
 async def async_setup_entry(
@@ -270,12 +311,32 @@ async def async_setup_entry(
     _cleanup_stale_wifi_registry_entries(
         hass,
         entry.entry_id,
-        tracked_macs,
+        (
+            tracked_macs
+            if entry.options.get(
+                CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+                DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+            )
+            else set()
+        ),
         {user.user_id for user in presence_users},
+        entry.options.get(
+            CONF_NETWORK_NEW_DEVICE_DETECTION,
+            DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+        ),
     )
-    if entry.options.get(
+    network_store: NetworkDeviceStore | None = None
+    tracking_enabled = entry.options.get(
         CONF_WIFI_TRACKING_ENABLED, DEFAULT_WIFI_TRACKING_ENABLED
-    ) and (tracked_macs or entry.options.get(CONF_WIFI_CLIENT_COUNT_SENSOR, False)):
+    )
+    track_fortiap = entry.options.get(
+        CONF_NETWORK_TRACK_FORTIAP_CLIENTS, DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS
+    )
+    if tracking_enabled and track_fortiap:
+        network_store = NetworkDeviceStore(hass, entry.entry_id)
+        await network_store.async_load()
+        tracked_names = tracked_names_from_options(entry.options)
+        owners = {mac: user.name for user in presence_users for mac in user.macs}
         wifi_coordinator = FortiGateWifiCoordinator(
             hass,
             entry,
@@ -286,6 +347,17 @@ async def async_setup_entry(
                 CONF_WIFI_AWAY_GRACE_PERIOD, DEFAULT_WIFI_AWAY_GRACE_PERIOD
             ),
             tracked_ssid_filters_from_options(entry.options),
+            network_store,
+            tracked_names,
+            owners,
+            entry.options.get(
+                CONF_NETWORK_NEW_DEVICE_DETECTION,
+                DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+            ),
+            entry.options.get(
+                CONF_RECENT_CLIENT_RETENTION_DAYS,
+                DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
+            ),
         )
     rule_manager: PresencePolicyRuleManager | None = None
     if wifi_coordinator is not None and policy_coordinators:
@@ -320,7 +392,7 @@ async def async_setup_entry(
                 ),
             )
     entry.runtime_data = FortiGateRuntimeData(
-        policy_coordinators, wifi_coordinator, rule_manager
+        policy_coordinators, wifi_coordinator, rule_manager, network_store
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     if rule_manager is not None:
@@ -340,7 +412,7 @@ async def async_migrate_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
     """Migrate entries without changing entity identity."""
-    if entry.version > 6:
+    if entry.version > 7:
         return False
     data = dict(entry.data)
     if entry.version == 1:
@@ -408,6 +480,23 @@ async def async_migrate_entry(
             policy_ids,
         )
         hass.config_entries.async_update_entry(entry, options=options, version=6)
+    if entry.version < 7:
+        options = dict(entry.options)
+        # Preserve the previous 180-second behavior for existing installations;
+        # 300 seconds is only the default for new entries.
+        options.setdefault(CONF_WIFI_AWAY_GRACE_PERIOD, 180)
+        options.setdefault(
+            CONF_NETWORK_TRACK_FORTIAP_CLIENTS, DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS
+        )
+        options.setdefault(
+            CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+            DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+        )
+        options.setdefault(
+            CONF_NETWORK_NEW_DEVICE_DETECTION,
+            DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+        )
+        hass.config_entries.async_update_entry(entry, options=options, version=7)
     return True
 
 
@@ -415,4 +504,7 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
     """Unload the config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded and entry.runtime_data.network_store is not None:
+        await entry.runtime_data.network_store.async_save()
+    return unloaded

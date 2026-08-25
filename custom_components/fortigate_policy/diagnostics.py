@@ -12,6 +12,9 @@ from .const import (
     CONF_ALLOWED_SSIDS,
     CONF_API_TOKEN,
     CONF_DEFAULT_OVERRIDE_MINUTES,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_NETWORK_NEW_DEVICE_DETECTION,
+    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICY_AUTOMATION_DRY_RUN,
     CONF_POLICY_AUTOMATION_ENABLED,
     CONF_TRACKED_CLIENTS,
@@ -104,6 +107,61 @@ async def async_get_config_entry_diagnostics(
                     if wifi and wifi.data
                     else None
                 ),
+                "network_device_presence": {
+                    "fortiap_provider_enabled": entry.options.get(
+                        CONF_NETWORK_TRACK_FORTIAP_CLIENTS, True
+                    ),
+                    "tracker_entities_enabled": entry.options.get(
+                        CONF_NETWORK_CREATE_TRACKER_ENTITIES, True
+                    ),
+                    "new_device_detection_enabled": entry.options.get(
+                        CONF_NETWORK_NEW_DEVICE_DETECTION, True
+                    ),
+                    "persistent_inventory_initialized": (
+                        runtime.network_store.initialized
+                        if runtime.network_store
+                        else False
+                    ),
+                    "known_client_count": (
+                        len(runtime.network_store.records)
+                        if runtime.network_store
+                        else 0
+                    ),
+                    "connected_client_count": (
+                        sum(
+                            state.is_connected is True
+                            for state in wifi.data.presence.values()
+                        )
+                        if wifi and wifi.data
+                        else None
+                    ),
+                    "away_grace_client_count": (
+                        sum(
+                            state.missing_since is not None
+                            and state.is_connected is not False
+                            for state in wifi.data.presence.values()
+                        )
+                        if wifi and wifi.data
+                        else None
+                    ),
+                    "unknown_connected_client_count": (
+                        len(set(wifi.data.clients) - tracked_macs)
+                        if wifi and wifi.data
+                        else None
+                    ),
+                    "fortiap_count": (
+                        len(
+                            {
+                                client.ap_serial or client.ap_name
+                                for client in wifi.data.clients.values()
+                                if client.ap_serial or client.ap_name
+                            }
+                        )
+                        if wifi and wifi.data
+                        else None
+                    ),
+                    "new_device_event": "fortigate_new_network_device",
+                },
             },
             "presence_policy_rules": {
                 "configured_user_count": len(presence_users),

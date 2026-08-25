@@ -56,6 +56,8 @@ class TestFortiGateWifiParser(unittest.TestCase):
                         "wtp_radio": "2",
                         "channel": "149",
                         "sta_snr": "41 dB",
+                        "interface_name": "Home-VLAN",
+                        "vendor": "Example vendor",
                     }
                 ],
             },
@@ -71,6 +73,10 @@ class TestFortiGateWifiParser(unittest.TestCase):
         self.assertEqual(2, parsed.radio)
         self.assertEqual(149, parsed.channel)
         self.assertEqual(41, parsed.snr)
+        self.assertEqual("Home-VLAN", parsed.interface)
+        self.assertEqual("Example vendor", parsed.manufacturer)
+        self.assertEqual("wifi", parsed.connection_type)
+        self.assertEqual("fortiap", parsed.source)
 
     def test_multiple_and_missing_optional_fields(self) -> None:
         clients, skipped, _ = parse_wifi_clients(

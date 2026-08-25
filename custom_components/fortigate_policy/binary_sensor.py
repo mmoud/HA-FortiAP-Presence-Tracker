@@ -9,13 +9,18 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import FortiGatePolicyConfigEntry, tracked_macs_from_options
-from .const import CONF_FRIENDLY_NAME, CONF_TRACKED_CLIENTS, DOMAIN
+from .const import (
+    CONF_FRIENDLY_NAME,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_TRACKED_CLIENTS,
+    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+)
 from .coordinator import FortiGateWifiCoordinator
+from .network_device import network_client_device_info
 from .policy_config import configured_policies
 from .presence_users import PresenceUser, aggregate_presence, configured_presence_users
 from .wifi import utcnow
@@ -39,7 +44,7 @@ async def async_setup_entry(
         tracked_macs,
         {policy.policy_id for policy in configured_policies(entry.data)},
     )
-    async_add_entities(
+    client_entities = (
         [
             FortiGateWifiPresenceBinarySensor(
                 entry,
@@ -49,6 +54,14 @@ async def async_setup_entry(
             )
             for mac in sorted(tracked_macs)
         ]
+        if entry.options.get(
+            CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+            DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+        )
+        else []
+    )
+    async_add_entities(
+        client_entities
         + [
             FortiGatePresenceUserBinarySensor(entry, coordinator, user)
             for user in users
@@ -91,12 +104,7 @@ class FortiGateWifiPresenceBinarySensor(
             if friendly_name
             else f"{mac.replace(':', '_')}_presence"
         )
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"{entry.entry_id}_wifi_{compact_mac}")},
-            "connections": {(dr.CONNECTION_NETWORK_MAC, mac)},
-            "name": device_name,
-            "via_device": (DOMAIN, entry.entry_id),
-        }
+        self._attr_device_info = network_client_device_info(entry, mac, device_name)
 
     @property
     def is_on(self) -> bool | None:

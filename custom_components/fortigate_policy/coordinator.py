@@ -23,9 +23,11 @@ from .api import (
 )
 from .const import (
     DOMAIN,
+    EVENT_NEW_NETWORK_DEVICE,
     UPDATE_RETRIES,
     UPDATE_RETRY_DELAY,
 )
+from .network_store import NetworkDeviceStore
 from .wifi import (
     FortiGateWifiClient,
     WifiPresence,
@@ -136,6 +138,11 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
         poll_interval: int,
         away_grace_period: int,
         ssid_filters: Mapping[str, frozenset[str]] | None = None,
+        network_store: NetworkDeviceStore | None = None,
+        tracked_names: Mapping[str, str] | None = None,
+        owners: Mapping[str, str] | None = None,
+        detect_new_devices: bool = True,
+        retention_days: int = 30,
     ) -> None:
         super().__init__(
             hass,
@@ -150,6 +157,11 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
         self._tracked_macs = tracked_macs
         self._ssid_filters = dict(ssid_filters or {})
         self._grace_period = timedelta(seconds=away_grace_period)
+        self.network_store = network_store
+        self._tracked_names = dict(tracked_names or {})
+        self._owners = dict(owners or {})
+        self._detect_new_devices = detect_new_devices
+        self._retention_days = retention_days
         self._restored_presence: dict[str, WifiPresence] = {}
         self.last_successful_update: datetime | None = None
         self.fortios_version: str | None = None
@@ -191,6 +203,47 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
         previous = (
             self.data.presence if self.data is not None else self._restored_presence
         )
+        if self.network_store is not None:
+            for mac, record in self.network_store.records.items():
+                if mac not in previous:
+                    previous[mac] = WifiPresence(
+                        record.connected,
+                        None,
+                        record.last_seen,
+                        None,
+                    )
+            new_records = self.network_store.process_clients(
+                clients,
+                now,
+                tracked_names=self._tracked_names,
+                owners=self._owners,
+                retention_days=self._retention_days,
+            )
+            if self._detect_new_devices:
+                for record in new_records:
+                    client = clients[record.mac]
+                    self.hass.bus.async_fire(
+                        EVENT_NEW_NETWORK_DEVICE,
+                        {
+                            "mac": client.mac,
+                            "ip": client.ip,
+                            "hostname": client.hostname,
+                            "ssid": client.ssid,
+                            "ap": client.ap_name,
+                            "vendor": client.manufacturer,
+                            "connection_type": client.connection_type,
+                            "timestamp": now.isoformat(),
+                            "fortigate_entry_id": self.config_entry.entry_id,
+                        },
+                    )
+                    _LOGGER.debug(
+                        "New network client discovered: %s", _masked_mac(record.mac)
+                    )
+            for record in new_records:
+                self.network_store.mark_announced(record.mac)
+        known_macs = set(self._tracked_macs) | set(clients)
+        if self.network_store is not None:
+            known_macs.update(self.network_store.records)
         presence = {
             mac: advance_presence(
                 previous.get(mac),
@@ -200,8 +253,36 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
                 now,
                 self._grace_period,
             )
-            for mac in self._tracked_macs
+            for mac in known_macs
         }
+        for mac, state in presence.items():
+            old = previous.get(mac)
+            if state.is_connected is False and (
+                old is None or old.is_connected is not False
+            ):
+                if self.network_store is not None:
+                    self.network_store.mark_away(mac)
+                _LOGGER.debug(
+                    "Network client %s marked not_home after %s seconds",
+                    _masked_mac(mac),
+                    int(self._grace_period.total_seconds()),
+                )
+            elif state.missing_since and (old is None or old.missing_since is None):
+                _LOGGER.debug(
+                    "Network client %s entered away grace period", _masked_mac(mac)
+                )
+            elif state.client and old and old.missing_since:
+                _LOGGER.debug(
+                    "Network client %s returned during away grace period",
+                    _masked_mac(mac),
+                )
+            if (
+                state.client
+                and old
+                and old.client
+                and state.client.ap_name != old.client.ap_name
+            ):
+                _LOGGER.debug("Network client %s moved access point", _masked_mac(mac))
         self.last_successful_update = now
         self._restored_presence = {}
         if skipped:
@@ -234,3 +315,8 @@ class FortiGateWifiCoordinator(DataUpdateCoordinator[FortiGateWifiData]):
             self._restored_presence[mac] = WifiPresence(
                 is_connected, None, last_seen if is_connected else None, None
             )
+
+
+def _masked_mac(mac: str) -> str:
+    """Retain enough of a MAC for debug correlation without logging it whole."""
+    return f"{mac[:8]}:xx:xx:xx"

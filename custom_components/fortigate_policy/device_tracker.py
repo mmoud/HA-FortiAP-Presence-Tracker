@@ -8,7 +8,6 @@ from typing import Any
 from homeassistant.components.device_tracker import ScannerEntity
 from homeassistant.const import CONF_HOST, STATE_HOME, STATE_NOT_HOME
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -18,8 +17,15 @@ from . import (
     tracked_macs_from_options,
     tracked_ssid_filters_from_options,
 )
-from .const import CONF_FRIENDLY_NAME, CONF_TRACKED_CLIENTS, CONF_VDOM, DOMAIN
+from .const import (
+    CONF_FRIENDLY_NAME,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_TRACKED_CLIENTS,
+    CONF_VDOM,
+    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+)
 from .coordinator import FortiGateWifiCoordinator
+from .network_device import network_client_device_info
 from .policy_config import configured_policies
 from .presence_users import PresenceUser, aggregate_presence, configured_presence_users
 from .wifi import utcnow
@@ -43,7 +49,7 @@ async def async_setup_entry(
         tracked_macs,
         {policy.policy_id for policy in configured_policies(entry.data)},
     )
-    async_add_entities(
+    client_entities = (
         [
             FortiGateWifiClientTracker(
                 entry,
@@ -53,6 +59,14 @@ async def async_setup_entry(
             )
             for mac in sorted(tracked_macs)
         ]
+        if entry.options.get(
+            CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+            DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+        )
+        else []
+    )
+    async_add_entities(
+        client_entities
         + [FortiGatePresenceUserTracker(entry, coordinator, user) for user in users]
     )
 
@@ -97,12 +111,9 @@ class FortiGateWifiClientTracker(
             else mac.replace(":", "_")
         )
         self._attr_mac_address = mac
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"{entry.entry_id}_wifi_{mac.replace(':', '')}")},
-            "connections": {(dr.CONNECTION_NETWORK_MAC, mac)},
-            "name": friendly_name or mac,
-            "via_device": (DOMAIN, entry.entry_id),
-        }
+        self._attr_device_info = network_client_device_info(
+            entry, mac, friendly_name or mac
+        )
         self._restored_connected: bool | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -152,7 +163,7 @@ class FortiGateWifiClientTracker(
         if self._allowed_ssids:
             attributes["allowed_ssids"] = sorted(self._allowed_ssids)
         if presence is None:
-            return attributes
+            return self._stored_attributes(attributes)
         if presence.last_seen:
             attributes["last_seen"] = presence.last_seen.isoformat()
         if presence.missing_since:
@@ -169,9 +180,24 @@ class FortiGateWifiClientTracker(
                 ("association_time", client.association_time),
                 ("vlan", client.vlan),
                 ("username", client.username),
+                ("interface", client.interface),
+                ("manufacturer", client.manufacturer),
+                ("connection_type", client.connection_type),
             ):
                 if value is not None:
                     attributes[key] = value
+        return self._stored_attributes(attributes)
+
+    def _stored_attributes(self, attributes: dict[str, Any]) -> dict[str, Any]:
+        store = self._entry.runtime_data.network_store
+        record = store.records.get(self._mac) if store else None
+        if record:
+            attributes["first_seen"] = record.first_seen.isoformat()
+            attributes["last_seen"] = record.last_seen.isoformat()
+            if record.connected_since:
+                attributes["connected_since"] = record.connected_since.isoformat()
+            if record.owner:
+                attributes["owner"] = record.owner
         return attributes
 
 

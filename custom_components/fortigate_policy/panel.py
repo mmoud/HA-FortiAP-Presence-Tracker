@@ -24,6 +24,9 @@ from .const import (
     CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_NETWORK_NEW_DEVICE_DETECTION,
+    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICIES,
     CONF_POLICY_AUTOMATION_DRY_RUN,
     CONF_POLICY_AUTOMATION_ENABLED,
@@ -50,6 +53,9 @@ from .const import (
     CONF_WIFI_CLIENT_COUNT_SENSOR,
     CONF_WIFI_POLL_INTERVAL,
     CONF_WIFI_TRACKING_ENABLED,
+    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+    DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+    DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
     DEFAULT_OVERRIDE_MINUTES,
     DEFAULT_POLICY_AUTOMATION_DRY_RUN,
     DEFAULT_POLICY_AUTOMATION_ENABLED,
@@ -86,7 +92,7 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-PANEL_VERSION = "3.4.5"
+PANEL_VERSION = "3.5.0"
 FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
 
 _LOGGER = logging.getLogger(__name__)
@@ -183,8 +189,24 @@ def _panel_data(entry) -> dict[str, Any]:
         options, {user.user_id for user in users}, policy_ids
     )
     runtime = entry.runtime_data
+    network_store = getattr(runtime, "network_store", None)
     recent = options.get(CONF_RECENT_WIFI_CLIENTS, {})
-    recent = recent if isinstance(recent, Mapping) else {}
+    recent = dict(recent) if isinstance(recent, Mapping) else {}
+    if network_store:
+        for mac, record in network_store.records.items():
+            stored = {
+                "last_seen": record.last_seen.isoformat(),
+                **{
+                    key: value
+                    for key, value in record.metadata.items()
+                    if key in {"hostname", "ip", "ssid", "ap_name", "manufacturer"}
+                },
+            }
+            existing = recent.get(mac, {})
+            recent[mac] = {
+                **stored,
+                **(dict(existing) if isinstance(existing, Mapping) else {}),
+            }
     known_ssids = {
         str(metadata["ssid"])
         for metadata in recent.values()
@@ -220,6 +242,18 @@ def _panel_data(entry) -> dict[str, Any]:
             ),
             CONF_WIFI_CLIENT_COUNT_SENSOR: options.get(
                 CONF_WIFI_CLIENT_COUNT_SENSOR, DEFAULT_WIFI_CLIENT_COUNT_SENSOR
+            ),
+            CONF_NETWORK_TRACK_FORTIAP_CLIENTS: options.get(
+                CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
+                DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
+            ),
+            CONF_NETWORK_CREATE_TRACKER_ENTITIES: options.get(
+                CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+                DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+            ),
+            CONF_NETWORK_NEW_DEVICE_DETECTION: options.get(
+                CONF_NETWORK_NEW_DEVICE_DETECTION,
+                DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
             ),
             CONF_POLICY_AUTOMATION_ENABLED: options.get(
                 CONF_POLICY_AUTOMATION_ENABLED, DEFAULT_POLICY_AUTOMATION_ENABLED
@@ -299,6 +333,24 @@ def _panel_data(entry) -> dict[str, Any]:
             ),
             "automation_error": (
                 runtime.rule_manager.last_error if runtime.rule_manager else None
+            ),
+            "known_network_devices": (
+                len(network_store.records) if network_store else 0
+            ),
+            "connected_network_devices": (
+                len(runtime.wifi_coordinator.data.clients)
+                if runtime.wifi_coordinator and runtime.wifi_coordinator.data
+                else None
+            ),
+            "grace_network_devices": (
+                sum(
+                    state.missing_since is not None and state.is_connected is not False
+                    for state in getattr(
+                        runtime.wifi_coordinator.data, "presence", {}
+                    ).values()
+                )
+                if runtime.wifi_coordinator and runtime.wifi_coordinator.data
+                else None
             ),
         },
     }
@@ -581,6 +633,27 @@ def _normalize_configuration(
                     CONF_WIFI_CLIENT_COUNT_SENSOR, DEFAULT_WIFI_CLIENT_COUNT_SENSOR
                 ),
                 "Wi-Fi client count sensor",
+            ),
+            CONF_NETWORK_TRACK_FORTIAP_CLIENTS: _boolean(
+                settings_raw.get(
+                    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
+                    DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
+                ),
+                "FortiAP network client provider",
+            ),
+            CONF_NETWORK_CREATE_TRACKER_ENTITIES: _boolean(
+                settings_raw.get(
+                    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+                    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+                ),
+                "Network client entities",
+            ),
+            CONF_NETWORK_NEW_DEVICE_DETECTION: _boolean(
+                settings_raw.get(
+                    CONF_NETWORK_NEW_DEVICE_DETECTION,
+                    DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+                ),
+                "New network device detection",
             ),
             CONF_POLICY_AUTOMATION_ENABLED: _boolean(
                 settings_raw.get(

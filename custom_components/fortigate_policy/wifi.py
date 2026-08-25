@@ -17,8 +17,8 @@ MAC_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 
 
 @dataclass(frozen=True, slots=True)
-class FortiGateWifiClient:
-    """One currently associated client, normalized across FortiOS variants."""
+class NetworkClient:
+    """One MAC-keyed network client normalized independently of its provider."""
 
     mac: str
     ip: str | None = None
@@ -35,6 +35,10 @@ class FortiGateWifiClient:
     vlan: str | None = None
     username: str | None = None
     vdom: str | None = None
+    interface: str | None = None
+    manufacturer: str | None = None
+    connection_type: str = "wifi"
+    source: str = "fortiap"
 
     def as_recent_metadata(self, seen_at: datetime) -> dict[str, str]:
         """Return the bounded, JSON-safe discovery cache representation."""
@@ -44,10 +48,42 @@ class FortiGateWifiClient:
             ("ip", self.ip),
             ("ssid", self.ssid),
             ("ap_name", self.ap_name),
+            ("manufacturer", self.manufacturer),
         ):
             if value:
                 result[key] = value
         return result
+
+    def as_storage_metadata(self) -> dict[str, str | int]:
+        """Return bounded JSON-safe metadata for persistent device history."""
+        return {
+            key: value
+            for key, value in (
+                ("ip", self.ip),
+                ("hostname", self.hostname),
+                ("ssid", self.ssid),
+                ("ap_name", self.ap_name),
+                ("ap_serial", self.ap_serial),
+                ("radio", self.radio),
+                ("band", self.band),
+                ("channel", self.channel),
+                ("rssi", self.rssi),
+                ("snr", self.snr),
+                ("association_time", self.association_time),
+                ("vlan", self.vlan),
+                ("username", self.username),
+                ("vdom", self.vdom),
+                ("interface", self.interface),
+                ("manufacturer", self.manufacturer),
+                ("connection_type", self.connection_type),
+                ("source", self.source),
+            )
+            if value is not None
+        }
+
+
+# Backward-compatible public name used throughout the original FortiAP feature.
+FortiGateWifiClient = NetworkClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,12 +164,21 @@ def parse_wifi_clients(
     skipped = 0
     for record in _client_records(payload):
         mac = normalize_mac(
-            _string(record, "mac", "sta_mac", "station_mac", "client_mac", "sta_addr")
+            _string(
+                record,
+                "mac",
+                "mac_address",
+                "hwaddr",
+                "sta_mac",
+                "station_mac",
+                "client_mac",
+                "sta_addr",
+            )
         )
         if mac is None:
             skipped += 1
             continue
-        client = FortiGateWifiClient(
+        client = NetworkClient(
             mac=mac,
             ip=_string(record, "ip", "sta_ip", "ipaddr", "ipv4"),
             hostname=_string(
@@ -156,6 +201,10 @@ def parse_wifi_clients(
             vlan=_string(record, "vlan", "vlan_id"),
             username=_string(record, "username", "user", "auth_user"),
             vdom=_string(record, "vdom") or configured_vdom,
+            interface=_string(record, "interface", "interface_name", "ifname", "intf"),
+            manufacturer=_string(
+                record, "manufacturer", "vendor", "device_vendor", "hw_vendor"
+            ),
         )
         # A duplicate MAC can occur during a short roam. Keep one associated
         # record; either one proves presence and no absence transition occurs.

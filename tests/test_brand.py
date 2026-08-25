@@ -24,9 +24,7 @@ class TestBrandAssets(unittest.TestCase):
 
     def test_integration_icons_have_home_assistant_dimensions(self) -> None:
         self.assertEqual((256, 256), _png_dimensions(INTEGRATION_BRAND / "icon.png"))
-        self.assertEqual(
-            (512, 512), _png_dimensions(INTEGRATION_BRAND / "icon@2x.png")
-        )
+        self.assertEqual((512, 512), _png_dimensions(INTEGRATION_BRAND / "icon@2x.png"))
 
     def test_hacs_repository_icons_match_integration_icons(self) -> None:
         for filename in ("icon.png", "icon@2x.png"):

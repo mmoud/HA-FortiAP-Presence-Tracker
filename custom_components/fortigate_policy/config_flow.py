@@ -41,6 +41,9 @@ from .const import (
     CONF_DEFAULT_OVERRIDE_MINUTES,
     CONF_FRIENDLY_NAME,
     CONF_LEGACY_PRIMARY_POLICY_ID,
+    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+    CONF_NETWORK_NEW_DEVICE_DETECTION,
+    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
     CONF_POLICIES,
     CONF_POLICY_AUTOMATION_DRY_RUN,
     CONF_POLICY_AUTOMATION_ENABLED,
@@ -72,6 +75,9 @@ from .const import (
     CONF_WIFI_CLIENT_COUNT_SENSOR,
     CONF_WIFI_POLL_INTERVAL,
     CONF_WIFI_TRACKING_ENABLED,
+    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+    DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+    DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
     DEFAULT_OVERRIDE_MINUTES,
     DEFAULT_POLICY_AUTOMATION_DRY_RUN,
     DEFAULT_POLICY_AUTOMATION_ENABLED,
@@ -251,6 +257,27 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
                     max=MAX_WIFI_AWAY_GRACE_PERIOD,
                 ),
             ),
+            vol.Required(
+                CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
+                default=defaults.get(
+                    CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
+                    DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
+                ),
+            ): bool,
+            vol.Required(
+                CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+                default=defaults.get(
+                    CONF_NETWORK_CREATE_TRACKER_ENTITIES,
+                    DEFAULT_NETWORK_CREATE_TRACKER_ENTITIES,
+                ),
+            ): bool,
+            vol.Required(
+                CONF_NETWORK_NEW_DEVICE_DETECTION,
+                default=defaults.get(
+                    CONF_NETWORK_NEW_DEVICE_DETECTION,
+                    DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
+                ),
+            ): bool,
             vol.Required(
                 CONF_WIFI_CLIENT_COUNT_SENSOR,
                 default=defaults.get(
@@ -438,7 +465,7 @@ def _error_key(err: Exception) -> str:
 class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure the integration entirely through Home Assistant's UI."""
 
-    VERSION = 6
+    VERSION = 7
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -1693,8 +1720,8 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                 user_input.get(self._MANUAL_MACS, ""),
             )
             if not self._selected_macs:
-                errors["base"] = "select_at_least_one"
-                return self._wifi_clients_form(errors)
+                self._named_clients = {}
+                return self._finish_wifi_clients()
             self._named_clients = _preserved_client_names(
                 self._selected_macs,
                 self.config_entry.options.get(CONF_TRACKED_CLIENTS, {}),
@@ -1858,6 +1885,20 @@ class FortiGatePolicyOptionsFlow(OptionsFlowWithReload):
                         for key, value in metadata.items()
                         if isinstance(value, str)
                     }
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        network_store = getattr(runtime, "network_store", None)
+        if network_store:
+            for mac, record in network_store.records.items():
+                recent[mac] = {
+                    "last_seen": record.last_seen.isoformat(),
+                    **{
+                        key: value
+                        for key, value in record.metadata.items()
+                        if key in {"hostname", "ip", "ssid", "ap_name", "manufacturer"}
+                        and isinstance(value, str)
+                    },
+                    **recent.get(mac, {}),
+                }
         seen_at = utcnow()
         for mac, client in clients.items():
             recent[mac] = client.as_recent_metadata(seen_at)

@@ -31,6 +31,7 @@ from .const import (
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
+    CONF_QUARANTINE_ENABLED,
     CONF_RECENT_CLIENT_RETENTION_DAYS,
     CONF_RECENT_WIFI_CLIENTS,
     CONF_TRACKED_CLIENTS,
@@ -45,6 +46,7 @@ from .const import (
     DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
     DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_QUARANTINE_ENABLED,
     DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
     DEFAULT_USER_AWAY_GRACE_PERIOD,
     DEFAULT_WIFI_AWAY_GRACE_PERIOD,
@@ -75,7 +77,7 @@ from .wifi import FortiGateWifiClient, normalize_mac, utcnow
 
 PANEL_PATH = "fortiap-presence"
 STATIC_URL = "/fortiap_presence_static"
-PANEL_VERSION = "3.7.1"
+PANEL_VERSION = "3.8.0"
 FRONTEND_FILE = f"fortiap-panel-{PANEL_VERSION}.js"
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,9 +117,7 @@ def _client_payload(client: FortiGateWifiClient) -> dict[str, Any]:
 
 def _tracker_state(runtime: object | None, mac: str) -> dict[str, Any]:
     coordinator = getattr(runtime, "wifi_coordinator", None)
-    if coordinator is None:
-        return {"state": "unavailable", "available": False}
-    presence = coordinator.presence_for(mac)
+    presence = coordinator.presence_for(mac) if coordinator is not None else None
     state = (
         "home"
         if presence and presence.is_connected is True
@@ -127,7 +127,7 @@ def _tracker_state(runtime: object | None, mac: str) -> dict[str, Any]:
     )
     result: dict[str, Any] = {
         "state": state,
-        "available": coordinator.last_update_success,
+        "available": bool(coordinator and coordinator.last_update_success),
     }
     if presence:
         if presence.last_seen:
@@ -136,6 +136,21 @@ def _tracker_state(runtime: object | None, mac: str) -> dict[str, Any]:
             result["missing_since"] = presence.missing_since.isoformat()
         if presence.client:
             result["client"] = _client_payload(presence.client)
+    quarantine = getattr(runtime, "quarantine_coordinator", None)
+    quarantine_data = getattr(quarantine, "data", None)
+    result["quarantine"] = (
+        "on"
+        if quarantine_data and mac in quarantine_data.quarantined_macs
+        else "off"
+        if quarantine_data
+        else "unavailable"
+    )
+    result["quarantine_available"] = bool(
+        quarantine
+        and quarantine.last_update_success
+        and quarantine_data
+        and quarantine_data.enabled
+    )
     return result
 
 
@@ -237,6 +252,9 @@ def _panel_data(entry) -> dict[str, Any]:
                 CONF_NETWORK_NEW_DEVICE_DETECTION,
                 DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
             ),
+            CONF_QUARANTINE_ENABLED: options.get(
+                CONF_QUARANTINE_ENABLED, DEFAULT_QUARANTINE_ENABLED
+            ),
             CONF_RECENT_CLIENT_RETENTION_DAYS: options.get(
                 CONF_RECENT_CLIENT_RETENTION_DAYS,
                 DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
@@ -301,6 +319,18 @@ def _panel_data(entry) -> dict[str, Any]:
                     for state in getattr(wifi_coordinator.data, "presence", {}).values()
                 )
                 if wifi_coordinator and wifi_coordinator.data
+                else None
+            ),
+            "quarantine_available": bool(
+                getattr(runtime, "quarantine_coordinator", None)
+                and runtime.quarantine_coordinator.last_update_success
+                and runtime.quarantine_coordinator.data
+                and runtime.quarantine_coordinator.data.enabled
+            ),
+            "quarantined_clients": (
+                len(runtime.quarantine_coordinator.data.quarantined_macs)
+                if getattr(runtime, "quarantine_coordinator", None)
+                and runtime.quarantine_coordinator.data
                 else None
             ),
         },
@@ -404,6 +434,70 @@ async def websocket_set_policy_status(
         msg["id"],
         {"id": policy.policy_id, "name": policy.name, "state": policy.status},
     )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/panel/quarantine/set",
+        vol.Required("entry_id"): str,
+        vol.Required("mac"): str,
+        vol.Required("quarantined"): bool,
+    }
+)
+@websocket_api.async_response
+async def websocket_set_quarantine(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run a verified native-quarantine transaction for one tracked MAC."""
+    try:
+        entry = _entry(hass, msg["entry_id"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "not_found", str(err))
+        return
+    mac = normalize_mac(msg["mac"])
+    tracked = entry.options.get(CONF_TRACKED_CLIENTS, {})
+    if not isinstance(tracked, Mapping):
+        tracked = {}
+    tracked_names = {
+        normalized: str(metadata.get(CONF_FRIENDLY_NAME, normalized))
+        for raw_mac, metadata in tracked.items()
+        if isinstance(metadata, Mapping)
+        and (normalized := normalize_mac(raw_mac)) is not None
+    }
+    coordinator = getattr(
+        getattr(entry, "runtime_data", None), "quarantine_coordinator", None
+    )
+    if mac is None or mac not in tracked_names or coordinator is None:
+        connection.send_error(
+            msg["id"], "not_found", "Quarantine is not enabled for this tracked device"
+        )
+        return
+    try:
+        await coordinator.async_set_mac_quarantine(
+            mac, msg["quarantined"], tracked_names[mac]
+        )
+    except FortiGateError as err:
+        _LOGGER.warning(
+            "Dashboard quarantine command failed (%s)", type(err).__name__
+        )
+        await coordinator.async_request_refresh()
+        connection.send_error(
+            msg["id"],
+            "quarantine_command_failed",
+            "FortiGate rejected the quarantine command or readback verification failed",
+        )
+        return
+    state = coordinator.data
+    actual = bool(state and mac in state.quarantined_macs)
+    if actual is not msg["quarantined"]:
+        connection.send_error(
+            msg["id"], "quarantine_verification_failed", "Quarantine state was not verified"
+        )
+        return
+    connection.send_result(msg["id"], {"mac": mac, "quarantined": actual})
 
 
 def _raw_configuration(
@@ -577,6 +671,12 @@ def _normalize_configuration(
                 ),
                 "New network device detection",
             ),
+            CONF_QUARANTINE_ENABLED: _boolean(
+                settings_raw.get(
+                    CONF_QUARANTINE_ENABLED, DEFAULT_QUARANTINE_ENABLED
+                ),
+                "Native host quarantine",
+            ),
         }
     )
     return options
@@ -673,6 +773,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_entries)
     websocket_api.async_register_command(hass, websocket_get_panel)
     websocket_api.async_register_command(hass, websocket_set_policy_status)
+    websocket_api.async_register_command(hass, websocket_set_quarantine)
     websocket_api.async_register_command(hass, websocket_save_panel)
     websocket_api.async_register_command(hass, websocket_discover_clients)
     if async_panel_exists(hass, PANEL_PATH):

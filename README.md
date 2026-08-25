@@ -17,6 +17,7 @@ The two features are independent. Use presence only, policy switches only, or co
 - persistent first seen, last seen, connection, and network metadata
 - optional new-device event, unknown-device sensor, and client-count sensor
 - one verified switch per configured FortiGate policy
+- optional verified native-quarantine switch on each selected client
 - importable presence-to-policy automation blueprint
 - full configuration through a responsive Home Assistant panel
 - centralized polling with one bulk client request per refresh
@@ -62,9 +63,12 @@ Create a dedicated REST API administrator such as `homeassistant-api`.
 
 - Presence tracking needs read access to Wireless Controller monitor data.
 - Policy switches need read/write access to firewall policies in the configured VDOM.
+- Quarantine switches need read/write access to **User & Device** configuration in the configured VDOM.
 - A combined installation needs both.
 
 FortiOS permission profiles normally cover a configuration area rather than one policy ID. Restrict the administrator's trusted hosts to the Home Assistant address, use the least-permissive profile that works on the installed FortiOS release, and keep the management interface private. Do not expose it to the Internet.
+
+Enable **User & Device: Read/Write** only when native quarantine control is required. Presence-only installations can leave quarantine disabled and keep read-only access. FortiOS permission profiles cannot normally restrict this write permission to one MAC address; Home Assistant therefore applies its own narrow target/MAC checks.
 
 ## Policy switches
 
@@ -106,6 +110,34 @@ Under **People**, several devices can be assigned to one aggregate person. Any d
 
 Apple devices may use private MAC addresses. Track the address FortiGate reports for the intended SSID; Apple's **Fixed Private Wi-Fi Address** mode provides a stable per-network identity without disabling the feature globally.
 
+## Quarantine
+
+Enable **Settings > Native host quarantine** in the FortiAP Presence dashboard to add a **Quarantine** switch to each selected network device. The switch uses FortiGate's native MAC host-quarantine configuration:
+
+```text
+GET /api/v2/cmdb/user/quarantine?vdom=<vdom>
+PUT /api/v2/cmdb/user/quarantine?vdom=<vdom>
+```
+
+It does not create or modify firewall policies. The integration reads the complete quarantine table once per polling cycle and maps normalized MAC addresses to devices. When a switch changes, it reads the current table, changes only that MAC, preserves every unrelated target and MAC, writes the merged `targets` table, and reads it again. The switch changes only after FortiGate reports the requested state. Manual FortiGate quarantine entries are also detected.
+
+New entries use the deterministic target name `HA_<MAC>` and `drop enable`. Releasing a device removes only its MAC; it removes an empty target only when its name exactly matches the integration's deterministic name for that MAC. Repeating either action is safe and does not create duplicates.
+
+Native quarantine must already be enabled on the FortiGate. The integration deliberately does not enable the global quarantine setting, choose a quarantine mode, create an address group, or change any policy, interface, VLAN, or SSID. If quarantine is disabled or the API account lacks permission, the command fails and the switch remains at the last verified state or becomes unavailable.
+
+### Bridge-mode FortiAP limitation
+
+On a bridged FortiAP SSID, the access point places the client on the local Layer-2 network. FortiGate quarantine can block the device when its traffic passes through the FortiGate—for example, Internet access or inter-VLAN traffic when the FortiGate is the client gateway. It may not block direct traffic between two devices on the same Layer-2 VLAN because that traffic may never reach the FortiGate.
+
+```text
+Client VLAN -> FortiGate gateway -> Internet     quarantine can block
+Client A <-> Client B on the same bridged VLAN  may bypass FortiGate
+```
+
+This is not complete LAN isolation. Effectiveness depends on the FortiGate being in the relevant traffic path.
+
+For automations, use the normal `switch.turn_on` and `switch.turn_off` actions with the device's Quarantine switch. No integration-specific service or MAC entry is required.
+
 ## Device history and new devices
 
 First seen, last seen, connected since, the last useful metadata, and new-device announcement state are stored in Home Assistant storage. The initial successful poll establishes a silent baseline. Later, a newly observed MAC can fire `fortigate_new_network_device` once. Restarts do not repeat the event.
@@ -130,6 +162,8 @@ Use the integration's **Enable debug logging** menu, reproduce the problem, then
 - **TLS failure:** install the appropriate CA certificate; disable verification only for an isolated test.
 - **No clients:** confirm the FortiGate manages the FortiAPs and the administrator can read Wireless Controller monitor data.
 - **Unexpected duplicate Apple device:** select the MAC used by the intended SSID and use a stable private-address mode.
+- **Quarantine unavailable:** enable native host quarantine on FortiGate, confirm the firmware exposes `config user quarantine`, and grant the dedicated API administrator User & Device read/write access.
+- **Quarantine does not block same-VLAN traffic:** this is expected on bridged SSIDs when traffic remains at Layer 2.
 
 The FortiGate device also provides **Refresh data**, which performs an immediate read of enabled features without changing firewall configuration.
 

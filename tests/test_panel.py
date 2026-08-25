@@ -409,7 +409,7 @@ class TestPanelRegistration(unittest.TestCase):
         ):
             asyncio.run(async_register_panel(hass))  # type: ignore[arg-type]
 
-        self.assertEqual(5, register_command.call_count)
+        self.assertEqual(6, register_command.call_count)
         hass.http.async_register_static_paths.assert_awaited_once()
         register_panel.assert_awaited_once()
         kwargs = register_panel.await_args.kwargs

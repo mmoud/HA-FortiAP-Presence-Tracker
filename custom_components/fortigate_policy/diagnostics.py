@@ -14,6 +14,7 @@ from .const import (
     CONF_NETWORK_CREATE_TRACKER_ENTITIES,
     CONF_NETWORK_NEW_DEVICE_DETECTION,
     CONF_NETWORK_TRACK_FORTIAP_CLIENTS,
+    CONF_QUARANTINE_ENABLED,
     CONF_TRACKED_CLIENTS,
     CONF_WIFI_AWAY_GRACE_PERIOD,
     CONF_WIFI_POLL_INTERVAL,
@@ -32,6 +33,7 @@ async def async_get_config_entry_diagnostics(
     """Return useful aggregate Wi-Fi diagnostics without client identities."""
     runtime = entry.runtime_data
     wifi = runtime.wifi_coordinator
+    quarantine = runtime.quarantine_coordinator
     tracked = entry.options.get(CONF_TRACKED_CLIENTS, {})
     tracked_macs = {
         normalized
@@ -162,6 +164,29 @@ async def async_get_config_entry_diagnostics(
             "presence_groups": {
                 "configured_user_count": len(presence_users),
                 "assigned_device_count": sum(len(user.macs) for user in presence_users),
+            },
+            "quarantine": {
+                "enabled": entry.options.get(CONF_QUARANTINE_ENABLED, False),
+                "supported": bool(quarantine and quarantine.data is not None),
+                "available": (
+                    quarantine.last_update_success if quarantine else None
+                ),
+                "quarantined_client_count": (
+                    len(quarantine.data.quarantined_macs)
+                    if quarantine and quarantine.data
+                    else None
+                ),
+                "target_count": (
+                    quarantine.data.target_count
+                    if quarantine and quarantine.data
+                    else None
+                ),
+                "last_successful_update": (
+                    quarantine.last_successful_update.isoformat()
+                    if quarantine and quarantine.last_successful_update
+                    else None
+                ),
+                "endpoint": "/api/v2/cmdb/user/quarantine",
             },
         },
         TO_REDACT,

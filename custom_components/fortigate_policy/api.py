@@ -13,6 +13,12 @@ from aiohttp import ClientError, ClientSession, ClientTimeout
 from yarl import URL
 
 from .const import DEFAULT_TIMEOUT, VALID_STATUSES
+from .quarantine import (
+    FortiGateQuarantineState,
+    parse_quarantine_state,
+    quarantine_results,
+    updated_quarantine_targets,
+)
 from .wifi import (
     FortiGateClientIdentity,
     FortiGateWifiClient,
@@ -103,6 +109,13 @@ class FortiGatePolicyApi:
             path="/api/v2/monitor/system/status",
             query={"vdom": vdom},
         )
+        self._quarantine_url = URL.build(
+            scheme="https",
+            host=host,
+            port=port,
+            path="/api/v2/cmdb/user/quarantine",
+            query={"vdom": vdom},
+        )
 
         def monitor_url(path: str) -> URL:
             return URL.build(
@@ -173,6 +186,52 @@ class FortiGatePolicyApi:
             raise FortiGateConnectionError(
                 "FortiGate returned an unexpected Wi-Fi client response"
             ) from err
+
+    async def async_get_quarantine_state(self) -> FortiGateQuarantineState:
+        """Read all native host-quarantine MACs with one CMDB request."""
+        payload = await self._async_request("GET", self._quarantine_url)
+        try:
+            return parse_quarantine_state(payload)
+        except ValueError as err:
+            raise FortiGateConnectionError(
+                "FortiGate returned an unexpected quarantine response"
+            ) from err
+
+    async def async_update_quarantine(
+        self, mac: str, desired: bool, friendly_name: str = ""
+    ) -> bool:
+        """Pre-read and update only the selected MAC in native quarantine.
+
+        FortiOS models ``config user quarantine`` as one singleton object. A
+        merge is therefore required, but every unrelated target and MAC is
+        copied forward. The coordinator serializes this transaction and proves
+        the result with another GET before Home Assistant changes state.
+        """
+        payload = await self._async_request("GET", self._quarantine_url)
+        try:
+            results = quarantine_results(payload)
+            state = parse_quarantine_state(payload)
+            targets, changed = updated_quarantine_targets(
+                results, mac, desired, friendly_name
+            )
+        except ValueError as err:
+            raise FortiGateConnectionError(
+                "FortiGate returned an unexpected quarantine response"
+            ) from err
+        if desired and not state.enabled:
+            raise FortiGateCommandError(
+                "FortiGate native host quarantine is disabled"
+            )
+        if not changed:
+            return False
+        response = await self._async_request(
+            "PUT", self._quarantine_url, json={"targets": targets}
+        )
+        if response.get("status") != "success":
+            raise FortiGateCommandError(
+                "FortiGate did not report a successful quarantine update"
+            )
+        return True
 
     async def async_get_fortios_version(self) -> str | None:
         """Read FortiOS version information without exposing appliance identity."""
@@ -281,7 +340,7 @@ class FortiGatePolicyApi:
                     raise FortiGateAuthError("FortiGate rejected the API credentials")
                 if response.status == 404:
                     raise FortiGateNotFoundError(
-                        "FortiGate policy resource was not found"
+                        "FortiGate resource was not found"
                     )
                 if response.status != 200:
                     log_failure(
@@ -383,7 +442,7 @@ class FortiGatePolicyApi:
             if reported_status in (401, 403, "401", "403"):
                 raise FortiGateAuthError("FortiGate rejected the API credentials")
             if reported_status in (404, "404"):
-                raise FortiGateNotFoundError("FortiGate policy resource was not found")
+                raise FortiGateNotFoundError("FortiGate resource was not found")
         return payload
 
     def _parse_policy(self, payload: Mapping[str, Any]) -> Policy:

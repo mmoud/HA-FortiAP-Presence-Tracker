@@ -49,6 +49,7 @@ from .const import (
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
     CONF_PRESENCE_USERS_TO_REMOVE,
+    CONF_QUARANTINE_ENABLED,
     CONF_RECENT_CLIENT_RETENTION_DAYS,
     CONF_RECENT_WIFI_CLIENTS,
     CONF_TRACKED_CLIENTS,
@@ -64,6 +65,7 @@ from .const import (
     DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_PORT,
+    DEFAULT_QUARANTINE_ENABLED,
     DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
     DEFAULT_USER_AWAY_GRACE_PERIOD,
     DEFAULT_VDOM,
@@ -238,6 +240,12 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
                 ),
             ): bool,
             vol.Required(
+                CONF_QUARANTINE_ENABLED,
+                default=defaults.get(
+                    CONF_QUARANTINE_ENABLED, DEFAULT_QUARANTINE_ENABLED
+                ),
+            ): bool,
+            vol.Required(
                 CONF_WIFI_CLIENT_COUNT_SENSOR,
                 default=defaults.get(
                     CONF_WIFI_CLIENT_COUNT_SENSOR,
@@ -404,7 +412,7 @@ def _error_key(err: Exception) -> str:
 class FortiGatePolicyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure the integration entirely through Home Assistant's UI."""
 
-    VERSION = 8
+    VERSION = 9
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

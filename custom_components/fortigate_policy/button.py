@@ -41,6 +41,7 @@ class FortiGateRefreshButton(ButtonEntity):
         return bool(
             self._entry.runtime_data.policy_coordinators
             or self._entry.runtime_data.wifi_coordinator is not None
+            or self._entry.runtime_data.quarantine_coordinator is not None
         )
 
     async def async_press(self) -> None:
@@ -48,6 +49,8 @@ class FortiGateRefreshButton(ButtonEntity):
         coordinators = list(self._entry.runtime_data.policy_coordinators.values())
         if self._entry.runtime_data.wifi_coordinator is not None:
             coordinators.append(self._entry.runtime_data.wifi_coordinator)
+        if self._entry.runtime_data.quarantine_coordinator is not None:
+            coordinators.append(self._entry.runtime_data.quarantine_coordinator)
         await asyncio.gather(
             *(coordinator.async_request_refresh() for coordinator in coordinators)
         )

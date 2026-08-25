@@ -28,6 +28,7 @@ from .const import (
     UPDATE_RETRY_DELAY,
 )
 from .network_store import NetworkDeviceStore
+from .quarantine import FortiGateQuarantineState
 from .wifi import (
     FortiGateWifiClient,
     WifiPresence,
@@ -76,17 +77,11 @@ class FortiGatePolicyCoordinator(DataUpdateCoordinator[Policy]):
     async def async_set_policy_status(self, desired_status: str) -> None:
         """Preflight, write status only, then prove FortiGate changed it."""
         async with self._command_lock:
-            # Mandatory preflight GET, including ID/name protection in the API client.
             preflight = await self._async_read_for_command()
             self.async_set_updated_data(preflight)
-
-            # Avoid an unnecessary write, but preserve the actual read state.
             if preflight.status == desired_status:
                 return
-
             await self.api.async_set_status(desired_status)
-
-            # FortiGate accepted the PUT; that alone is not success. Re-read it.
             last_error: FortiGateError | None = None
             for attempt in range(UPDATE_RETRIES):
                 try:
@@ -99,7 +94,6 @@ class FortiGatePolicyCoordinator(DataUpdateCoordinator[Policy]):
                         return
                 if attempt < UPDATE_RETRIES - 1:
                     await asyncio.sleep(UPDATE_RETRY_DELAY.total_seconds())
-
             if last_error is not None:
                 raise last_error
             raise FortiGateConnectionError(
@@ -112,6 +106,85 @@ class FortiGatePolicyCoordinator(DataUpdateCoordinator[Policy]):
         self.last_successful_check = datetime.now(UTC)
         return policy
 
+
+class FortiGateQuarantineCoordinator(DataUpdateCoordinator[FortiGateQuarantineState]):
+    """Poll native quarantine once and serialize verified per-MAC mutations."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        api: FortiGatePolicyApi,
+        poll_interval: int,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=entry,
+            name=f"{DOMAIN}_quarantine",
+            update_interval=timedelta(seconds=poll_interval),
+            always_update=False,
+        )
+        self.api = api
+        self.last_successful_update: datetime | None = None
+        self._command_lock = asyncio.Lock()
+
+    async def _async_update_data(self) -> FortiGateQuarantineState:
+        try:
+            state = await self.api.async_get_quarantine_state()
+        except FortiGateError as err:
+            raise UpdateFailed("Unable to determine FortiGate quarantine state") from err
+        self.last_successful_update = datetime.now(UTC)
+        _LOGGER.debug(
+            "Retrieved %s native quarantine MACs in %s targets",
+            len(state.quarantined_macs),
+            state.target_count,
+        )
+        return state
+
+    async def async_set_mac_quarantine(
+        self, mac: str, desired: bool, friendly_name: str
+    ) -> None:
+        """Merge one MAC, then read back actual FortiGate state."""
+        async with self._command_lock:
+            _LOGGER.debug(
+                "%s native quarantine for network client %s",
+                "Enabling" if desired else "Releasing",
+                _masked_mac(mac),
+            )
+            preflight = await self.api.async_get_quarantine_state()
+            self.last_successful_update = datetime.now(UTC)
+            self.async_set_updated_data(preflight)
+            if (mac in preflight.quarantined_macs) is desired:
+                return
+            await self.api.async_update_quarantine(mac, desired, friendly_name)
+            last_error: FortiGateError | None = None
+            for attempt in range(UPDATE_RETRIES):
+                try:
+                    state = await self.api.async_get_quarantine_state()
+                except FortiGateError as err:
+                    last_error = err
+                else:
+                    self.last_successful_update = datetime.now(UTC)
+                    self.async_set_updated_data(state)
+                    if (mac in state.quarantined_macs) is desired:
+                        _LOGGER.debug(
+                            "Native quarantine verified %s for network client %s",
+                            "on" if desired else "off",
+                            _masked_mac(mac),
+                        )
+                        return
+                if attempt < UPDATE_RETRIES - 1:
+                    await asyncio.sleep(UPDATE_RETRY_DELAY.total_seconds())
+            if last_error is not None:
+                raise last_error
+            _LOGGER.warning(
+                "Native quarantine verification failed for network client %s",
+                _masked_mac(mac),
+            )
+            raise FortiGateConnectionError(
+                "FortiGate quarantine did not reach the requested state"
+            )
 
 @dataclass(frozen=True, slots=True)
 class FortiGateWifiData:

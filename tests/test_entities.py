@@ -46,13 +46,18 @@ from custom_components.fortigate_policy.const import (
     CONF_PRESENCE_USER_MACS,
     CONF_PRESENCE_USER_NAME,
     CONF_PRESENCE_USERS,
+    CONF_QUARANTINE_ENABLED,
     CONF_TRACKED_CLIENTS,
     CONF_USER_AWAY_GRACE_PERIOD,
     CONF_VDOM,
     CONF_VERIFY_SSL,
 )
 from custom_components.fortigate_policy.presence_users import PresenceUser
-from custom_components.fortigate_policy.switch import FortiGatePolicySwitch
+from custom_components.fortigate_policy.quarantine import FortiGateQuarantineState
+from custom_components.fortigate_policy.switch import (
+    FortiGatePolicySwitch,
+    FortiGateQuarantineSwitch,
+)
 from custom_components.fortigate_policy.wifi import WifiPresence
 from tests.test_api import FakeResponse, FakeSession
 
@@ -74,6 +79,13 @@ class FakePolicyCoordinator:
         self.data = policy
         self.last_update_success = True
         self.last_successful_check = NOW
+
+
+class FakeQuarantineCoordinator:
+    def __init__(self, macs: frozenset[str]) -> None:
+        self.data = FortiGateQuarantineState(True, macs, 1)
+        self.last_update_success = True
+        self.last_successful_update = NOW
 
 
 class FakeRefreshCoordinator:
@@ -459,7 +471,8 @@ class TestPolicyOptions(unittest.TestCase):
 
         self.assertTrue(asyncio.run(async_migrate_entry(hass, entry)))
         migrated = updates[-1]
-        self.assertEqual(8, migrated["version"])
+        self.assertEqual(9, migrated["version"])
+        self.assertFalse(migrated["options"][CONF_QUARANTINE_ENABLED])
         self.assertEqual(180, migrated["options"]["wifi_away_grace_period"])
         self.assertTrue(migrated["options"][CONF_NETWORK_TRACK_FORTIAP_CLIENTS])
         self.assertTrue(migrated["options"][CONF_NETWORK_CREATE_TRACKER_ENTITIES])
@@ -492,7 +505,8 @@ class TestPolicyOptions(unittest.TestCase):
 
         self.assertTrue(asyncio.run(async_migrate_entry(hass, entry)))
         migrated = updates[-1]
-        self.assertEqual(8, migrated["version"])
+        self.assertEqual(9, migrated["version"])
+        self.assertFalse(migrated["options"][CONF_QUARANTINE_ENABLED])
         self.assertEqual(
             [MAC],
             migrated["options"][CONF_PRESENCE_USERS]["person-1"][
@@ -538,17 +552,40 @@ class TestPolicySwitchEntities(unittest.TestCase):
         self.assertEqual("61", primary.extra_state_attributes["policy_id"])
         self.assertEqual("72", secondary.extra_state_attributes["policy_id"])
 
+    def test_quarantine_switch_shares_client_device_and_uses_mac_identity(self) -> None:
+        entry = SimpleNamespace(
+            entry_id="entry-1",
+            data={CONF_VDOM: "root"},
+            runtime_data=SimpleNamespace(network_store=None),
+        )
+        coordinator = FakeQuarantineCoordinator(frozenset({MAC}))
+        entity = FortiGateQuarantineSwitch(
+            entry, coordinator, MAC, "Example phone"  # type: ignore[arg-type]
+        )
+        self.assertTrue(entity.is_on)
+        self.assertEqual("entry-1_wifi_aabbccddeeff_quarantine", entity.unique_id)
+        self.assertEqual(
+            {("fortigate_policy", "entry-1_wifi_aabbccddeeff")},
+            entity.device_info["identifiers"],
+        )
+        coordinator.data = FortiGateQuarantineState(True, frozenset(), 1)
+        self.assertFalse(entity.is_on)
+        coordinator.data = FortiGateQuarantineState(False, frozenset(), 1)
+        self.assertFalse(entity.available)
+
 
 class TestRefreshButton(unittest.TestCase):
     def test_refreshes_every_coordinator_without_writes(self) -> None:
         policy_a = FakeRefreshCoordinator()
         policy_b = FakeRefreshCoordinator()
         wifi = FakeRefreshCoordinator()
+        quarantine = FakeRefreshCoordinator()
         entry = SimpleNamespace(
             entry_id="entry-1",
             runtime_data=SimpleNamespace(
                 policy_coordinators={"61": policy_a, "72": policy_b},
                 wifi_coordinator=wifi,
+                quarantine_coordinator=quarantine,
             ),
         )
         button = FortiGateRefreshButton(entry)  # type: ignore[arg-type]
@@ -558,6 +595,7 @@ class TestRefreshButton(unittest.TestCase):
         self.assertEqual(1, policy_a.refreshes)
         self.assertEqual(1, policy_b.refreshes)
         self.assertEqual(1, wifi.refreshes)
+        self.assertEqual(1, quarantine.refreshes)
         self.assertEqual("entry-1_refresh_data", button.unique_id)
 
 

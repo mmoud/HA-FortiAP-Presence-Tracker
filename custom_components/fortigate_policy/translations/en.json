@@ -153,6 +153,7 @@
           "network_track_fortiap_clients": "Track FortiAP network clients",
           "network_create_tracker_entities": "Create device tracker and network detail entities",
           "network_new_device_detection": "Detect new network devices and fire events",
+          "quarantine_enabled": "Create native FortiGate quarantine switches",
           "wifi_client_count_sensor": "Create Wi-Fi client count sensor",
           "recent_client_retention_days": "Recently seen device retention (days)"
         }
@@ -212,6 +213,11 @@
     "binary_sensor": {
       "presence": {
         "name": "Presence"
+      }
+    },
+    "switch": {
+      "quarantine": {
+        "name": "Quarantine"
       }
     },
     "sensor": {

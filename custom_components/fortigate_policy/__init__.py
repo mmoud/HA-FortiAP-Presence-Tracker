@@ -25,6 +25,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_PRESENCE_POLICY_RULES,
     CONF_PRESENCE_USERS,
+    CONF_QUARANTINE_ENABLED,
     CONF_RECENT_CLIENT_RETENTION_DAYS,
     CONF_TRACKED_CLIENTS,
     CONF_VDOM,
@@ -36,13 +37,18 @@ from .const import (
     DEFAULT_NETWORK_NEW_DEVICE_DETECTION,
     DEFAULT_NETWORK_TRACK_FORTIAP_CLIENTS,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_QUARANTINE_ENABLED,
     DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
     DEFAULT_WIFI_AWAY_GRACE_PERIOD,
     DEFAULT_WIFI_POLL_INTERVAL,
     DEFAULT_WIFI_TRACKING_ENABLED,
     DOMAIN,
 )
-from .coordinator import FortiGatePolicyCoordinator, FortiGateWifiCoordinator
+from .coordinator import (
+    FortiGatePolicyCoordinator,
+    FortiGateQuarantineCoordinator,
+    FortiGateWifiCoordinator,
+)
 from .network_store import NetworkDeviceStore
 from .policy_config import configured_policies, fortigate_entry_title, migrate_v1_data
 from .presence_users import (
@@ -68,6 +74,7 @@ class FortiGateRuntimeData:
 
     policy_coordinators: dict[str, FortiGatePolicyCoordinator]
     wifi_coordinator: FortiGateWifiCoordinator | None
+    quarantine_coordinator: FortiGateQuarantineCoordinator | None
     network_store: NetworkDeviceStore | None
 
 
@@ -258,6 +265,7 @@ async def async_setup_entry(
             raise result
 
     wifi_coordinator: FortiGateWifiCoordinator | None = None
+    quarantine_coordinator: FortiGateQuarantineCoordinator | None = None
     tracked_macs = tracked_macs_from_options(entry.options)
     presence_users = configured_presence_users(
         entry.options, tracked_macs, set(policy_coordinators)
@@ -313,8 +321,20 @@ async def async_setup_entry(
                 DEFAULT_RECENT_CLIENT_RETENTION_DAYS,
             ),
         )
+    if tracked_macs and entry.options.get(
+        CONF_QUARANTINE_ENABLED, DEFAULT_QUARANTINE_ENABLED
+    ):
+        quarantine_coordinator = FortiGateQuarantineCoordinator(
+            hass,
+            entry,
+            wifi_api,
+            entry.options.get(CONF_WIFI_POLL_INTERVAL, DEFAULT_WIFI_POLL_INTERVAL),
+        )
     entry.runtime_data = FortiGateRuntimeData(
-        policy_coordinators, wifi_coordinator, network_store
+        policy_coordinators,
+        wifi_coordinator,
+        quarantine_coordinator,
+        network_store,
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     if wifi_coordinator is not None:
@@ -323,6 +343,9 @@ async def async_setup_entry(
         # response begins its grace timer. A Wi-Fi error never prevents the
         # firewall switch from loading.
         await wifi_coordinator.async_refresh()
+    if quarantine_coordinator is not None:
+        # This optional feature must not prevent presence or policy setup.
+        await quarantine_coordinator.async_refresh()
     return True
 
 
@@ -330,7 +353,7 @@ async def async_migrate_entry(
     hass: HomeAssistant, entry: FortiGatePolicyConfigEntry
 ) -> bool:
     """Migrate entries without changing entity identity."""
-    if entry.version > 8:
+    if entry.version > 9:
         return False
     data = dict(entry.data)
     migrated_options: dict[str, Any] | None = None
@@ -417,6 +440,13 @@ async def async_migrate_entry(
             set(),
         )
         hass.config_entries.async_update_entry(entry, options=options, version=8)
+        migrated_options = options
+    if entry.version < 9:
+        options = dict(
+            migrated_options if migrated_options is not None else entry.options
+        )
+        options.setdefault(CONF_QUARANTINE_ENABLED, DEFAULT_QUARANTINE_ENABLED)
+        hass.config_entries.async_update_entry(entry, options=options, version=9)
     return True
 
 

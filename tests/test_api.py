@@ -139,6 +139,88 @@ class TestFortiGatePolicyApi(unittest.TestCase):
         self.assertEqual({"status": "disable"}, kwargs["json"])
         self.assertNotIn("data", kwargs["json"])
 
+    def test_quarantine_uses_one_bulk_cmdb_read(self) -> None:
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "status": "success",
+                        "results": {
+                            "quarantine": "enable",
+                            "targets": [
+                                {
+                                    "entry": "manual",
+                                    "macs": [
+                                        {
+                                            "mac": "AA-BB-CC-DD-EE-FF",
+                                            "drop": "enable",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                )
+            ]
+        )
+        state = asyncio.run(api(session).async_get_quarantine_state())
+        self.assertIn("aa:bb:cc:dd:ee:ff", state.quarantined_macs)
+        self.assertEqual(1, len(session.requests))
+        self.assertEqual(
+            "/api/v2/cmdb/user/quarantine", session.requests[0][1].path
+        )
+
+    def test_quarantine_write_preserves_unrelated_entries(self) -> None:
+        config = {
+            "status": "success",
+            "results": {
+                "quarantine": "enable",
+                "targets": [
+                    {
+                        "entry": "manual",
+                        "description": "keep",
+                        "macs": [
+                            {"mac": "11:22:33:44:55:66", "drop": "enable"}
+                        ],
+                    }
+                ],
+            },
+        }
+        session = FakeSession(
+            [FakeResponse(200, config), FakeResponse(200, {"status": "success"})]
+        )
+        changed = asyncio.run(
+            api(session).async_update_quarantine(
+                "AA-BB-CC-DD-EE-FF", True, "Example phone"
+            )
+        )
+        self.assertTrue(changed)
+        self.assertEqual(["GET", "PUT"], [item[0] for item in session.requests])
+        body = session.requests[1][2]["json"]
+        self.assertEqual("manual", body["targets"][0]["entry"])
+        self.assertEqual("11:22:33:44:55:66", body["targets"][0]["macs"][0]["mac"])
+        self.assertEqual("HA_AABBCCDDEEFF", body["targets"][1]["entry"])
+        self.assertEqual({"targets"}, set(body))
+
+    def test_disabled_global_quarantine_rejects_add_without_put(self) -> None:
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "status": "success",
+                        "results": {"quarantine": "disable", "targets": []},
+                    },
+                )
+            ]
+        )
+        with self.assertRaises(FortiGateCommandError):
+            asyncio.run(
+                api(session).async_update_quarantine("aa:bb:cc:dd:ee:ff", True)
+            )
+        self.assertEqual(["GET"], [item[0] for item in session.requests])
+
     def test_unsuccessful_write_response_is_rejected(self) -> None:
         session = FakeSession([FakeResponse(200, {"status": "error"})])
 

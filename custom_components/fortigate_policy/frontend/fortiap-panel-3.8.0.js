@@ -24,6 +24,7 @@ class FortiApPresencePanel extends HTMLElement {
     this._loading = true;
     this._saving = false;
     this._policyBusy = new Set();
+    this._quarantineBusy = new Set();
     this._tab = "overview";
     this._data = null;
     this._draft = null;
@@ -165,6 +166,34 @@ class FortiApPresencePanel extends HTMLElement {
     }
   }
 
+  async _setQuarantine(mac, quarantined) {
+    if (!this._data || this._quarantineBusy.has(mac)) return;
+    this._quarantineBusy.add(mac);
+    this._error = "";
+    this._notice = `Verifying native FortiGate quarantine for ${mac}…`;
+    this._render();
+    try {
+      const verified = await this.hass.callWS({
+        type: `${DOMAIN}/panel/quarantine/set`,
+        entry_id: this._data.entry_id,
+        mac,
+        quarantined,
+      });
+      const tracker = this._draft.trackers.find((item) => item.mac === mac);
+      if (tracker) {
+        tracker.quarantine = verified.quarantined ? "on" : "off";
+        tracker.quarantine_available = true;
+      }
+      this._notice = `Native FortiGate quarantine is verified ${verified.quarantined ? "on" : "off"}.`;
+    } catch (error) {
+      this._notice = "";
+      this._error = `${error?.message || "Unable to change quarantine."} The displayed state was not changed.`;
+    } finally {
+      this._quarantineBusy.delete(mac);
+      this._render();
+    }
+  }
+
   _syncInputs() {
     if (!this.shadowRoot || !this._draft) return;
     this.shadowRoot.querySelectorAll("[data-model]").forEach((input) => {
@@ -194,6 +223,9 @@ class FortiApPresencePanel extends HTMLElement {
     if (name === "discover") void this._discover();
     if (name === "set-policy") {
       void this._setPolicy(action.dataset.id, action.dataset.status);
+    }
+    if (name === "set-quarantine") {
+      void this._setQuarantine(action.dataset.mac, action.dataset.quarantined === "true");
     }
     if (name === "entry") void this._load(action.dataset.entryId);
     if (name === "remove-tracker") {
@@ -298,6 +330,7 @@ class FortiApPresencePanel extends HTMLElement {
       ${this._metric("Tracked devices", d.trackers.length, `${health.known_network_devices || 0} known · ${health.connected_network_devices ?? "–"} connected`, "cellphone-link", "blue")}
       ${this._metric("People", d.users.length, "Multi-device presence groups", "account-group", "green")}
       ${this._metric("Firewall policies", d.policies.length, "Status-only verified control", "shield-check", "orange")}
+      ${this._metric("Quarantined", health.quarantined_clients ?? "–", health.quarantine_available ? "Native FortiGate state available" : "Native quarantine unavailable", "shield-lock-outline", "purple")}
       <section class="card span-6"><div class="section-head"><div class="section-title"><span class="section-icon">${this._icon("router-wireless")}</span><div><h2>Connection</h2><div class="muted">FortiGate management path</div></div></div><span class="status ${health.wifi_available ? "ok" : "unavailable"}">${this._icon(health.wifi_available ? "check-circle" : "alert-circle")}${health.wifi_available ? "Wi-Fi API available" : "Wi-Fi API unavailable"}</span></div>
         <div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(d.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(d.connection.vdom)}</strong></div><div><div class="muted">HTTPS port</div><strong>${escapeHtml(d.connection.port)}</strong></div><div><div class="muted">FortiOS</div><strong>${escapeHtml(health.fortios_version || "Unknown")}</strong></div></div>
       </section>
@@ -307,7 +340,7 @@ class FortiApPresencePanel extends HTMLElement {
   }
 
   _metric(title, value, detail, icon, tone) {
-    return `<section class="card span-4 metric-card ${escapeHtml(tone)}"><span class="metric-icon">${this._icon(icon)}</span><div><div class="metric-label">${escapeHtml(title)}</div><div class="metric">${escapeHtml(value)}</div><div class="metric-detail">${escapeHtml(detail)}</div></div></section>`;
+    return `<section class="card span-3 metric-card ${escapeHtml(tone)}"><span class="metric-icon">${this._icon(icon)}</span><div><div class="metric-label">${escapeHtml(title)}</div><div class="metric">${escapeHtml(value)}</div><div class="metric-detail">${escapeHtml(detail)}</div></div></section>`;
   }
 
   _icon(name) {
@@ -328,7 +361,7 @@ class FortiApPresencePanel extends HTMLElement {
   _devices() {
     const trackers = this._draft.trackers;
     return `<div class="grid"><section class="card"><div class="section-head"><div><h2>Tracked wireless devices</h2><div class="muted">Actual association state, friendly name, and optional SSID scope</div></div><button class="btn refresh" data-action="discover">Discover now</button></div>
-        ${trackers.length ? `<table class="mobile-table"><thead><tr><th>State</th><th>Device</th><th>Current connection</th><th>Allowed SSIDs</th><th></th></tr></thead><tbody>${trackers.map((item, index) => `<tr><td data-label="State"><span class="status ${escapeHtml(item.state)}">${escapeHtml(item.state)}</span></td><td data-label="Device"><div><label class="field-label">Friendly name<input class="editable" data-model="trackers.${index}.name" value="${escapeHtml(item.name)}"></label><div class="mono muted">${escapeHtml(item.mac)}</div></div></td><td data-label="Connection"><div><strong>${escapeHtml(item.client?.ssid || "—")}</strong><div class="muted">${escapeHtml(item.client?.ap_name || "No current FortiAP")}</div></div></td><td data-label="Allowed SSIDs"><label>Wi-Fi networks<input data-model="trackers.${index}.allowed_ssids" data-kind="csv" value="${escapeHtml((item.allowed_ssids || []).join(", "))}" placeholder="Any managed SSID"></label></td><td class="right mobile-actions"><button class="btn remove" data-action="remove-tracker" data-mac="${escapeHtml(item.mac)}" title="Remove tracker">Remove</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">No selected trackers. Discover clients below.</div>`}
+        ${trackers.length ? `<table class="mobile-table"><thead><tr><th>State</th><th>Device</th><th>Current connection</th><th>Quarantine</th><th>Allowed SSIDs</th><th></th></tr></thead><tbody>${trackers.map((item, index) => `<tr><td data-label="State"><span class="status ${escapeHtml(item.state)}">${escapeHtml(item.state)}</span></td><td data-label="Device"><div><label class="field-label">Friendly name<input class="editable" data-model="trackers.${index}.name" value="${escapeHtml(item.name)}"></label><div class="mono muted">${escapeHtml(item.mac)}</div></div></td><td data-label="Connection"><div><strong>${escapeHtml(item.client?.ssid || "—")}</strong><div class="muted">${escapeHtml(item.client?.ap_name || "No current FortiAP")}</div></div></td><td data-label="Quarantine">${this._quarantineAction(item)}</td><td data-label="Allowed SSIDs"><label>Wi-Fi networks<input data-model="trackers.${index}.allowed_ssids" data-kind="csv" value="${escapeHtml((item.allowed_ssids || []).join(", "))}" placeholder="Any managed SSID"></label></td><td class="right mobile-actions"><button class="btn remove" data-action="remove-tracker" data-mac="${escapeHtml(item.mac)}" title="Remove tracker">Remove</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">No selected trackers. Discover clients below.</div>`}
       </section><section class="card"><div class="section-head"><div><h2>Discovered clients</h2><div class="muted">${escapeHtml(this._discovered.length)} available clients. Only devices you add become entities.</div></div></div><div class="table-scroll">${this._discoveredTable()}</div></section></div>`;
   }
 
@@ -370,11 +403,21 @@ class FortiApPresencePanel extends HTMLElement {
     return `<button class="btn ${tone} policy-action" data-action="set-policy" data-id="${escapeHtml(policy.id)}" data-status="${desired}" ${busy ? 'disabled' : ''}>${label}</button>`;
   }
 
+  _quarantineAction(item) {
+    const busy = this._quarantineBusy.has(item.mac);
+    if (!this._draft.settings.quarantine_enabled || !item.quarantine_available || !["on", "off"].includes(item.quarantine)) {
+      return `<button class="btn policy-action" disabled>${this._draft.settings.quarantine_enabled ? "Unavailable" : "Disabled"}</button>`;
+    }
+    const desired = item.quarantine !== "on";
+    const label = busy ? "Verifying…" : desired ? "Quarantine" : "Release";
+    return `<button class="btn ${desired ? "disable" : "track"} policy-action" data-action="set-quarantine" data-mac="${escapeHtml(item.mac)}" data-quarantined="${desired}" ${busy ? "disabled" : ""}>${label}</button>`;
+  }
+
   _settings() {
     const s = this._draft.settings;
     const number = (key, title, min, max) => `<label>${escapeHtml(title)}<input type="number" min="${min}" max="${max}" data-kind="number" data-model="settings.${key}.${key}" value="${escapeHtml(s[key])}"></label>`;
     const toggle = (key, title, detail) => `<label class="toggle"><input type="checkbox" data-model="settings.${key}.${key}" ${s[key] ? "checked" : ""}><span><strong>${escapeHtml(title)}</strong><br><span class="muted">${escapeHtml(detail)}</span></span></label>`;
-    return `<div class="grid"><section class="card span-6"><h2>Network Device Presence+</h2><div class="stack" style="margin-top:16px">${toggle("wifi_tracking_enabled", "Enable network device tracking", "Runs the shared network presence coordinator")}${toggle("network_track_fortiap_clients", "Track FortiAP clients", "Uses the FortiGate associated-client monitor as the network data provider")}${toggle("network_create_tracker_entities", "Create device entities", "Creates a tracker, connected sensor, and compact network details for selected devices")}${toggle("network_new_device_detection", "Detect new devices", "Fires fortigate_new_network_device once for a newly observed MAC")}${toggle("wifi_client_count_sensor", "Wi-Fi client count sensor", "Creates an optional associated-client count sensor")}<div class="form-grid">${number("wifi_poll_interval", "Network polling interval (seconds)", 15, 120)}${number("wifi_away_grace_period", "Away timeout (seconds)", 30, 3600)}${number("recent_client_retention_days", "Device history retention (days)", 1, 365)}</div></div></section><section class="card span-6"><h2>Policy switches</h2><p class="muted">The integration polls each configured policy and exposes a verified Home Assistant switch. Presence and schedule behavior is configured with Home Assistant automations.</p><div class="form-grid">${number("poll_interval", "Policy polling interval (seconds)", 30, 3600)}</div></section><section class="card"><h2>Connection settings</h2><p class="muted">Host, VDOM, token, port, and TLS trust remain in Home Assistant's Reconfigure flow because they are connection credentials rather than operational settings.</p><div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(this._draft.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(this._draft.connection.vdom)}</strong></div><div><div class="muted">Port</div><strong>${escapeHtml(this._draft.connection.port)}</strong></div><div><div class="muted">TLS verification</div><strong>${this._draft.connection.verify_ssl ? "Enabled" : "Disabled"}</strong></div></div></section></div>`;
+    return `<div class="grid"><section class="card span-6"><h2>Network Device Presence+</h2><div class="stack" style="margin-top:16px">${toggle("wifi_tracking_enabled", "Enable network device tracking", "Runs the shared network presence coordinator")}${toggle("network_track_fortiap_clients", "Track FortiAP clients", "Uses the FortiGate associated-client monitor as the network data provider")}${toggle("network_create_tracker_entities", "Create device entities", "Creates a tracker, connected sensor, and compact network details for selected devices")}${toggle("network_new_device_detection", "Detect new devices", "Fires fortigate_new_network_device once for a newly observed MAC")}${toggle("wifi_client_count_sensor", "Wi-Fi client count sensor", "Creates an optional associated-client count sensor")}<div class="form-grid">${number("wifi_poll_interval", "Network polling interval (seconds)", 15, 120)}${number("wifi_away_grace_period", "Away timeout (seconds)", 30, 3600)}${number("recent_client_retention_days", "Device history retention (days)", 1, 365)}</div></div></section><section class="card span-6"><h2>FortiGate controls</h2><div class="stack" style="margin-top:16px">${toggle("quarantine_enabled", "Native host quarantine", "Creates one verified quarantine switch on each selected network device. Requires User & Device read/write access.")}<p class="muted">Quarantine uses <code>config user quarantine</code>; it never creates or changes firewall policies. On bridge-mode SSIDs it blocks only traffic that traverses the FortiGate and is not complete Layer-2 isolation.</p><div class="form-grid">${number("poll_interval", "Policy polling interval (seconds)", 30, 3600)}</div></div></section><section class="card"><h2>Connection settings</h2><p class="muted">Host, VDOM, token, port, and TLS trust remain in Home Assistant's Reconfigure flow because they are connection credentials rather than operational settings.</p><div class="form-grid"><div><div class="muted">Host</div><strong>${escapeHtml(this._draft.connection.host)}</strong></div><div><div class="muted">VDOM</div><strong>${escapeHtml(this._draft.connection.vdom)}</strong></div><div><div class="muted">Port</div><strong>${escapeHtml(this._draft.connection.port)}</strong></div><div><div class="muted">TLS verification</div><strong>${this._draft.connection.verify_ssl ? "Enabled" : "Disabled"}</strong></div></div></section></div>`;
   }
 
   _trackerName(mac) {
